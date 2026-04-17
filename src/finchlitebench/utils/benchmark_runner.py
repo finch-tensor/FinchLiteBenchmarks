@@ -22,6 +22,17 @@ from finchlite.autoschedule.tensor_stats import (
 )
 from finchlite.finch_notation.interpreter import NotationInterpreter
 
+from ..benchmarks.cg import (
+    benchmark_cg,
+    dg_cg_sparse_1,
+    dg_cg_sparse_2,
+    dg_cg_sparse_3,
+    dg_cg_sparse_4,
+    dg_cg_sparse_5,
+    dg_cg_sparse_6,
+    dg_cg_sparse_7,
+    dg_cg_sparse_8,
+)
 from ..benchmarks.matmul import (
     benchmark_matmul,
     dg_matmul_dense_large,
@@ -64,6 +75,7 @@ SCHEDULER_DICT = {
 
 BENCHMARK_DICT = {
     "matmul": benchmark_matmul,
+    "cg": benchmark_cg,
 }
 
 REFERENCE_DICT = {
@@ -76,6 +88,16 @@ DATA_GENERATOR_DICT = {
         "matmul_dense_large": dg_matmul_dense_large,
         "matmul_sparse_small": dg_matmul_sparse_small,
         "matmul_sparse_large": dg_matmul_sparse_large,
+    },
+    "cg": {
+        "cg_sparse_1": dg_cg_sparse_1,
+        "cg_sparse_2": dg_cg_sparse_2,
+        "cg_sparse_3": dg_cg_sparse_3,
+        "cg_sparse_4": dg_cg_sparse_4,
+        "cg_sparse_5": dg_cg_sparse_5,
+        "cg_sparse_6": dg_cg_sparse_6,
+        "cg_sparse_7": dg_cg_sparse_7,
+        "cg_sparse_8": dg_cg_sparse_8,
     },
 }
 
