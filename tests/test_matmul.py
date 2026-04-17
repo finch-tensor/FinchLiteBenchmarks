@@ -3,7 +3,7 @@ import pytest
 
 import finchlite as fl
 
-from src.benchmarks.matmul import benchmark_matmul
+from finchlitebench.benchmarks.matmul import benchmark_matmul
 
 
 @pytest.mark.parametrize(
