@@ -8,12 +8,6 @@ from scipy.sparse import random
 import finchlite as fl
 
 
-def _spmv(ctx, A_lazy, v):
-    """SpMV: A (n×n) times v (n,) → (n,). Wraps v to (n,1) for fl.matmul, then flattens."""
-    v_col = fl.lazy(fl.asarray(np.asarray(v)[:, None]))
-    return fl.asarray(np.asarray(fl.compute(fl.matmul(A_lazy, v_col), ctx=ctx)).flatten())
-
-
 def benchmark_cg(ctx, A_bench, b_bench, x_bench, rel_tol=1e-8, abs_tol=1e-20, max_iters=10_000):
     A = fl.lazy(fl.asarray(np.asarray(A_bench)))
     b = fl.asarray(np.asarray(b_bench).flatten())
@@ -23,14 +17,14 @@ def benchmark_cg(ctx, A_bench, b_bench, x_bench, rel_tol=1e-8, abs_tol=1e-20, ma
     tolerance = max(rel_tol * np.sqrt(bb), abs_tol)
     tol_sq = tolerance * tolerance
 
-    r = fl.asarray(np.asarray(b) - np.asarray(_spmv(ctx, A, x)))
+    r = fl.asarray(np.asarray(b) - np.asarray(fl.compute(fl.matmul(A, fl.lazy(fl.asarray(np.asarray(x)[:, None]))), ctx=ctx)).flatten())
     p = r
     it = 0
     rr = float(fl.compute(fl.vecdot(fl.lazy(r), fl.lazy(r)), ctx=ctx)[()])
 
     if rr >= tol_sq:
         while it < max_iters:
-            Ap = _spmv(ctx, A, p)
+            Ap = fl.asarray(np.asarray(fl.compute(fl.matmul(A, fl.lazy(fl.asarray(np.asarray(p)[:, None]))), ctx=ctx)).flatten())
             alpha = rr / float(fl.compute(fl.vecdot(fl.lazy(r), fl.lazy(Ap)), ctx=ctx)[()])
             x = fl.asarray(np.asarray(x) + alpha * np.asarray(p))
             r = fl.asarray(np.asarray(r) - alpha * np.asarray(Ap))
