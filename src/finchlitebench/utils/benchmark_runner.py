@@ -2,6 +2,8 @@ import argparse
 import time
 from collections import defaultdict
 
+import numpy as np
+
 import finchlite as fl
 from finchlite.autoschedule import (
     DefaultLogicFormatter,
@@ -64,6 +66,10 @@ BENCHMARK_DICT = {
     "matmul": benchmark_matmul,
 }
 
+REFERENCE_DICT = {
+    "matmul": lambda A, B: A @ B,
+}
+
 DATA_GENERATOR_DICT = {
     "matmul": {
         "matmul_dense_small": dg_matmul_dense_small,
@@ -74,24 +80,30 @@ DATA_GENERATOR_DICT = {
 }
 
 
-def run_benchmark(ctx, benchmark_function, benchmark_data_generator, iters):
+def run_benchmark(ctx, benchmark_function, benchmark_data_generator, iters, reference_fn=None):
     execution_times = []
+    relative_errors = []
     for _ in range(iters):
         data = benchmark_data_generator()
         start = time.perf_counter()
-        benchmark_function(ctx, *data)
+        result = benchmark_function(ctx, *data)
         end = time.perf_counter()
         execution_times.append(end - start)
+        if reference_fn is not None:
+            ref = reference_fn(*data)
+            actual_nnz = np.count_nonzero(ref)
+            computed_nnz = np.count_nonzero(np.asarray(result))
+            relative_errors.append((computed_nnz - actual_nnz) / actual_nnz * 100)
     print(f"Benchmark took an average of {sum(execution_times) / len(execution_times)} seconds")
-    return execution_times
+    return execution_times, relative_errors
 
 
-def save_benchmark_results(results_folder, execution_times, scheduler, benchmark, data_generator):
+def save_benchmark_results(results_folder, execution_times, relative_errors, scheduler, benchmark, data_generator):
     filename = f"{results_folder}/{scheduler}_{benchmark}_{data_generator}.csv"
     with open(filename, "w") as f:
-        f.write("Scheduler,Benchmark,Data Generator,Iteration,ExecutionTime\n")
-        for i, t in enumerate(execution_times, start=1):
-            f.write(f"{scheduler},{benchmark},{data_generator},{i},{t}\n")
+        f.write("Scheduler,Benchmark,Data Generator,Iteration,ExecutionTime,RelativeError\n")
+        for i, (t, e) in enumerate(zip(execution_times, relative_errors), start=1):
+            f.write(f"{scheduler},{benchmark},{data_generator},{i},{t},{e}\n")
 
 
 def main(
@@ -150,10 +162,11 @@ def main(
             for dg_name, dg in collected_data_generators[benchmark_name].items():
                 if dg_name not in data_generator_names:
                     continue
+                reference_fn = REFERENCE_DICT.get(benchmark_name)
                 print(f"Running {benchmark_name} | {scheduler_name} | {dg_name}")
-                execution_times = run_benchmark(ctx, benchmark, dg, iters)
+                execution_times, relative_errors = run_benchmark(ctx, benchmark, dg, iters, reference_fn)
                 save_benchmark_results(
-                    results_folder, execution_times, scheduler_name, benchmark_name, dg_name
+                    results_folder, execution_times, relative_errors, scheduler_name, benchmark_name, dg_name
                 )
 
 
