@@ -155,7 +155,7 @@ def main(
     parser.add_argument("--data-generator", default=["all"], nargs="*")
     parser.add_argument("--iterations", default=5, type=int)
     parser.add_argument("--results-folder", default="results")
-    parser.add_argument("--stats", action="store_true", help="Run stats estimation benchmarks instead of full execution")
+    parser.add_argument("--stats", action="store_true", help="Run stats estimation benchmarks")
     args = parser.parse_args(args)
 
     if benchmark_names is None:
