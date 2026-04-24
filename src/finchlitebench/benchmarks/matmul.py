@@ -9,7 +9,7 @@ from finchlite.autoschedule import Aggregate, Field, Literal, MapJoin, Table
 from finchlite.autoschedule.tensor_stats import StatsInterpreter
 
 
-def benchmark_matmul_stats(stats_factory, A, B):
+def benchmark_matmul(stats_factory, A, B):
     i, k, j = Field("i"), Field("k"), Field("j")
     A_fl = fl.asarray(A)
     B_fl = fl.asarray(B)
@@ -21,13 +21,6 @@ def benchmark_matmul_stats(stats_factory, A, B):
     interp = StatsInterpreter(stats_factory=stats_factory)
     result = interp(node, OrderedDict())
     return result.estimate_non_fill_values()
-
-
-def benchmark_matmul(ctx, A, B):
-    A_lazy = fl.lazy(fl.asarray(A))
-    B_lazy = fl.lazy(fl.asarray(B))
-    C_lazy = fl.matmul(A_lazy, B_lazy)
-    return fl.compute(C_lazy, ctx=ctx)
 
 
 def dg_matmul_dense_small():

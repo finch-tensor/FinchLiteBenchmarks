@@ -5,15 +5,6 @@ from collections import defaultdict
 import os
 import numpy as np
 
-import finchlite as fl
-from finchlite.autoschedule import (
-    DefaultLogicFormatter,
-    LogicExecutor,
-    LogicNormalizer,
-    LogicStandardizer,
-)
-from finchlite.autoschedule.compiler import LogicCompiler
-from finchlite.autoschedule.galley_optimize import GalleyLogicalOptimizer
 from finchlite.autoschedule.tensor_stats import (
     BlockedStatsFactory,
     DatabaseStatsFactory,
@@ -21,7 +12,6 @@ from finchlite.autoschedule.tensor_stats import (
     DenseStatsFactory,
     UniformStatsFactory,
 )
-from finchlite.finch_notation.interpreter import NotationInterpreter
 
 from ..benchmarks.cg import (
     benchmark_cg,
@@ -36,25 +26,11 @@ from ..benchmarks.cg import (
 )
 from ..benchmarks.matmul import (
     benchmark_matmul,
-    benchmark_matmul_stats,
     dg_matmul_dense_large,
     dg_matmul_dense_small,
     dg_matmul_sparse_large,
     dg_matmul_sparse_small,
 )
-
-
-def galley_scheduler(stats_factory):
-    return LogicNormalizer(
-        LogicExecutor(
-            GalleyLogicalOptimizer(
-                LogicStandardizer(
-                    DefaultLogicFormatter(LogicCompiler(NotationInterpreter()))
-                )
-            ),
-            stats_factory=stats_factory,
-        )
-    )
 
 
 def blocked_factory(inner_factory):
@@ -78,14 +54,6 @@ STATS_FACTORY_DICT = {
     "BlockedDCStats": blocked_factory(DCStatsFactory()),
 }
 
-STATS_BENCHMARK_DICT = {
-    "matmul": benchmark_matmul_stats,
-}
-
-REFERENCE_DICT = {
-    "matmul": lambda A, B: A @ B,
-}
-
 DATA_GENERATOR_DICT = {
     "matmul": {
         "matmul_dense_small": dg_matmul_dense_small,
@@ -103,6 +71,10 @@ DATA_GENERATOR_DICT = {
         "cg_sparse_7": dg_cg_sparse_7,
         "cg_sparse_8": dg_cg_sparse_8,
     },
+}
+
+REFERENCE_DICT = {
+    "matmul": lambda A, B: A @ B,
 }
 
 
@@ -177,9 +149,9 @@ def main(
     if args.stats:
         for factory_name, stats_factory in STATS_FACTORY_DICT.items():
             for benchmark_name in benchmark_names:
-                if benchmark_name not in STATS_BENCHMARK_DICT:
+                if benchmark_name not in BENCHMARK_DICT:
                     continue
-                stats_benchmark = STATS_BENCHMARK_DICT[benchmark_name]
+                stats_benchmark = BENCHMARK_DICT[benchmark_name]
                 for dg_name, dg in collected_data_generators[benchmark_name].items():
                     if dg_name not in data_generator_names:
                         continue
