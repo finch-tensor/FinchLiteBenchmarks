@@ -85,6 +85,7 @@ def run_stats_benchmark(stats_factory, stats_benchmark_fn, benchmark_data_genera
         data = benchmark_data_generator()
         start = time.perf_counter()
         estimated_nnz = stats_benchmark_fn(stats_factory, *data)
+
         end = time.perf_counter()
         execution_times.append(end - start)
         if reference_fn is not None:
