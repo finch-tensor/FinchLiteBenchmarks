@@ -32,12 +32,6 @@ from ..benchmarks.matmul import (
     dg_matmul_sparse_small,
 )
 
-
-def blocked_factory(inner_factory):
-    factory = BlockedStatsFactory({}, inner_factory)
-    factory.blocks_per_dim = defaultdict(lambda: 8)
-    return factory
-
 BENCHMARK_DICT = {
     "matmul": benchmark_matmul,
     "cg": benchmark_cg,
@@ -76,6 +70,11 @@ DATA_GENERATOR_DICT = {
 REFERENCE_DICT = {
     "matmul": lambda A, B: A @ B,
 }
+
+def blocked_factory(inner_factory):
+    factory = BlockedStatsFactory({}, inner_factory)
+    factory.blocks_per_dim = defaultdict(lambda: 8)
+    return factory
 
 
 def run_stats_benchmark(stats_factory, stats_benchmark_fn, benchmark_data_generator, iters, reference_fn=None):
