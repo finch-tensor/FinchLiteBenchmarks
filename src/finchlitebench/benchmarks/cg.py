@@ -23,7 +23,7 @@ def benchmark_cg(ctx, A_bench, b_bench, x_bench, rel_tol=1e-8, abs_tol=1e-20, ma
     rr = float(fl.compute(fl.vecdot(fl.lazy(r), fl.lazy(r)), ctx=ctx)[()])
 
     if rr >= tol_sq:
-        while it < max_iters:
+        if it < max_iters:
             Ap = fl.asarray(np.asarray(fl.compute(fl.matmul(A, fl.lazy(fl.asarray(np.asarray(p)[:, None]))), ctx=ctx)).flatten())
             alpha = rr / float(fl.compute(fl.vecdot(fl.lazy(r), fl.lazy(Ap)), ctx=ctx)[()])
             x = fl.asarray(np.asarray(x) + alpha * np.asarray(p))
