@@ -32,9 +32,6 @@ def benchmark_cg(ctx, A_bench, b_bench, x_bench, rel_tol=1e-8, abs_tol=1e-20, ma
 
             it += 1
 
-            if new_rr < tol_sq:
-                break
-
             beta = new_rr / rr
             p = fl.asarray(np.asarray(r) + beta * np.asarray(p))
             rr = new_rr
