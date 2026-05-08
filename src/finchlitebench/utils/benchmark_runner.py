@@ -3,7 +3,6 @@ import time
 from collections import defaultdict
 
 import os
-import numpy as np
 
 from finchlite.autoschedule.tensor_stats import (
     BlockedStatsFactory,
@@ -26,11 +25,42 @@ from ..benchmarks.cg import (
 )
 from ..benchmarks.matmul import (
     benchmark_matmul,
-    dg_matmul_dense_large,
-    dg_matmul_dense_small,
-    dg_matmul_sparse_large,
-    dg_matmul_sparse_small,
+    matmul_dense_small,
+    matmul_sparse_small,
+    matmul_dense_large,
+    matmul_sparse_large,
+    matmul_dense_horizontal_clash,
+    matmul_sparse_horizontal_clash,
+    matmul_dense_column_row,
+    matmul_sparse_column_row,
+    matmul_dense_col,
+    matmul_sparse_col,
+    matmul_sparse_single_col,
+    matmul_sparse_single_col_double,
+    matmul_sparse_outer_clash,
+    matmul_sparse_inner_clash,
+    matmul_diagonal,
+    matmul_tridiagonal,
+    matmul_banded,
+    matmul_upper_triangular,
+    matmul_lower_triangular,
+    matmul_triangular_clash,
+    matmul_vertical_horizontal,
+    matmul_vertical_stripe,
+    matmul_horizontal_stripe,
+    matmul_mod32,
+    matmul_diagonal_anti_clash,
+    matmul_anti_anti_clash,
+    chain_matmul_dense_10,
+    chain_matmul_sparse_5,
+    chain_matmul_sparse_10,
+    chain_matmul_diagonal_10,
+    chain_matmul_diagonal_anti_10,
+    chain_matmul_mod32_10,
+    chain_matmul_vertical_stripe_10,
+    chain_matmul_triangular_clash_10,
 )
+from .pure_stats import PureStats
 
 BENCHMARK_DICT = {
     "matmul": benchmark_matmul,
@@ -56,10 +86,40 @@ STATS_FACTORY_DICT = {
 
 DATA_GENERATOR_DICT = {
     "matmul": {
-        "matmul_dense_small": dg_matmul_dense_small,
-        "matmul_dense_large": dg_matmul_dense_large,
-        "matmul_sparse_small": dg_matmul_sparse_small,
-        "matmul_sparse_large": dg_matmul_sparse_large,
+        "matmul_dense_small": matmul_dense_small,
+        "matmul_sparse_small": matmul_sparse_small,
+        "matmul_dense_large": matmul_dense_large,
+        "matmul_sparse_large": matmul_sparse_large,
+        "matmul_dense_horizontal_clash": matmul_dense_horizontal_clash,
+        "matmul_sparse_horizontal_clash": matmul_sparse_horizontal_clash,
+        "matmul_dense_column_row": matmul_dense_column_row,
+        "matmul_sparse_column_row": matmul_sparse_column_row,
+        "matmul_dense_col": matmul_dense_col,
+        "matmul_sparse_col": matmul_sparse_col,
+        "matmul_sparse_single_col": matmul_sparse_single_col,
+        "matmul_single_col_double_sparse": matmul_sparse_single_col_double,
+        "matmul_sparse_outer_clash": matmul_sparse_outer_clash,
+        "matmul_sparse_inner_clash": matmul_sparse_inner_clash,
+        "matmul_diagonal": matmul_diagonal,
+        "matmul_tridiagonal": matmul_tridiagonal,
+        "matmul_banded": matmul_banded,
+        "matmul_upper_triangular": matmul_upper_triangular,
+        "matmul_lower_triangular": matmul_lower_triangular,
+        "matmul_triangular_clash": matmul_triangular_clash,
+        "matmul_vertical_horizontal": matmul_vertical_horizontal,
+        "matmul_vertical_stripe": matmul_vertical_stripe,
+        "matmul_horizontal_stripe": matmul_horizontal_stripe,
+        "matmul_mod32": matmul_mod32,
+        "matmul_diagonal_anti_clash": matmul_diagonal_anti_clash,
+        "matmul_anti_anti_clash": matmul_anti_anti_clash,
+        "chain_matmul_dense_10": chain_matmul_dense_10,
+        "chain_matmul_sparse_5": chain_matmul_sparse_5,
+        "chain_matmul_sparse_10": chain_matmul_sparse_10,
+        "chain_matmul_diagonal_10": chain_matmul_diagonal_10,
+        "chain_matmul_diagonal_anti_10": chain_matmul_diagonal_anti_10,
+        "chain_matmul_mod32_10": chain_matmul_mod32_10,
+        "chain_matmul_vertical_stripe_10": chain_matmul_vertical_stripe_10,
+        "chain_matmul_triangular_clash_10": chain_matmul_triangular_clash_10,
     },
     "cg": {
         "cg_sparse_1": dg_cg_sparse_1,
@@ -73,23 +133,23 @@ DATA_GENERATOR_DICT = {
     },
 }
 
-REFERENCE_DICT = {
-    "matmul": lambda A, B: A @ B,
+PURE_STATS_DICT = {
+    "matmul": lambda data: PureStats(*data).eager_nnz,
+
 }
 
 
-def run_stats_benchmark(stats_factory, stats_benchmark_fn, benchmark_data_generator, iters, reference_fn=None):
+def run_stats_benchmark(stats_factory, stats_benchmark_fn, benchmark_data_generator, iters, pure_stats_fn=None):
     execution_times = []
     relative_errors = []
     for _ in range(iters):
         data = benchmark_data_generator()
         start = time.perf_counter()
         estimated_nnz = stats_benchmark_fn(stats_factory, *data)
-
         end = time.perf_counter()
         execution_times.append(end - start)
-        if reference_fn is not None:
-            actual_nnz = np.count_nonzero(reference_fn(*data))
+        if pure_stats_fn is not None:
+            actual_nnz = pure_stats_fn(data)
             relative_errors.append((estimated_nnz - actual_nnz) / actual_nnz * 100)
     print(f"Stats estimation took an average of {sum(execution_times) / len(execution_times)} seconds")
     return execution_times, relative_errors
@@ -156,9 +216,9 @@ def main(
                 for dg_name, dg in collected_data_generators[benchmark_name].items():
                     if dg_name not in data_generator_names:
                         continue
-                    reference_fn = REFERENCE_DICT.get(benchmark_name)
+                    pure_stats_fn = PURE_STATS_DICT.get(benchmark_name)
                     print(f"Stats {benchmark_name} | {factory_name} | {dg_name}")
-                    execution_times, relative_errors = run_stats_benchmark(stats_factory, stats_benchmark, dg, iters, reference_fn)
+                    execution_times, relative_errors = run_stats_benchmark(stats_factory, stats_benchmark, dg, iters, pure_stats_fn)
                     save_benchmark_results(results_folder, execution_times, relative_errors, factory_name, benchmark_name, dg_name)
 
 if __name__ == "__main__":
