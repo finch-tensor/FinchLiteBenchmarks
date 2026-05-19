@@ -1,8 +1,6 @@
 import argparse
-import time
-from collections import defaultdict
-
 import os
+import time
 
 from finchlite.autoschedule.tensor_stats import (
     BlockedStatsFactory,
@@ -68,9 +66,7 @@ BENCHMARK_DICT = {
 }
 
 def blocked_factory(inner_factory):
-    factory = BlockedStatsFactory({}, inner_factory)
-    factory.blocks_per_dim = defaultdict(lambda: 8)
-    return factory
+    return BlockedStatsFactory(inner_factory, block_count=8)
 
 
 STATS_FACTORY_DICT = {

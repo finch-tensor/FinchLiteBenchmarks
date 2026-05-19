@@ -4,7 +4,7 @@ import numpy as np
 import scipy.sparse as sp
 
 import finchlite as fl
-from finchlite import ffunc
+from finchlite import ffuncs
 from finchlite.autoschedule import Aggregate, Field, Literal, MapJoin, Table
 from finchlite.autoschedule.tensor_stats import StatsInterpreter
 
@@ -15,10 +15,10 @@ def benchmark_matmul(stats_factory, *matrices):
     fl_matrices = [fl.asarray(m) for m in matrices]
 
     node = Aggregate(
-        Literal(ffunc.add),
+        Literal(ffuncs.add),
         Literal(0.0),
         MapJoin(
-            Literal(ffunc.mul),
+            Literal(ffuncs.mul),
             (
                 Table(Literal(fl_matrices[0]), (indices[0], indices[1])),
                 Table(Literal(fl_matrices[1]), (indices[1], indices[2])),
@@ -28,10 +28,10 @@ def benchmark_matmul(stats_factory, *matrices):
     )
     for k in range(2, n):
         node = Aggregate(
-            Literal(ffunc.add),
+            Literal(ffuncs.add),
             Literal(0.0),
             MapJoin(
-                Literal(ffunc.mul),
+                Literal(ffuncs.mul),
                 (node, Table(Literal(fl_matrices[k]), (indices[k], indices[k + 1]))),
             ),
             (indices[k],),
@@ -312,7 +312,7 @@ def chain_matmul_sparse_10():
 
 
 def chain_matmul_diagonal_10():
-    return tuple(np.diag(np.random.random(64)) for _ in range(10))
+    return tuple(np.diag(np.random.random(32)) for _ in range(10))
 
 
 def chain_matmul_diagonal_anti_10():
