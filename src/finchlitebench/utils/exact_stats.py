@@ -27,11 +27,32 @@ class ExactStatsFactory(BaseTensorStatsFactory["ExactStats"]):
         if len(all_stats) == 1:
             return ExactStats.from_tensor(new_def, all_stats[0].tensor)
 
+        target_order = list(new_def.index_order)
         result = all_stats[0].tensor
-        for s in all_stats[1:]:
-            result = eager.matmul(result,s.tensor)
-        return ExactStats.from_tensor(new_def, result)
+        cur_order = list(all_stats[0].tensordef.index_order)
 
+        for s in all_stats[1:]:
+            s_order = list(s.tensordef.index_order)
+
+            cur_exp = result
+            cur_cur = list(cur_order)
+            for pos, idx in enumerate(target_order):
+                if idx not in cur_cur:
+                    cur_exp = eager.expand_dims(cur_exp, axis=pos)
+                    cur_cur.insert(pos, idx)
+
+            s_exp = s.tensor
+            s_cur = list(s_order)
+            for pos, idx in enumerate(target_order):
+                if idx not in s_cur:
+                    s_exp = eager.expand_dims(s_exp, axis=pos)
+                    s_cur.insert(pos, idx)
+
+            a, b = eager.broadcast_arrays(cur_exp, s_exp)
+            result = eager.multiply(a, b)
+            cur_order = target_order
+
+        return ExactStats.from_tensor(new_def, result)
 
     def _merge_union(
         self, new_def: TensorDef, all_stats: list[ExactStats]
@@ -67,24 +88,23 @@ class ExactStatsFactory(BaseTensorStatsFactory["ExactStats"]):
         return ExactStats.from_tensor(new_def, result)
 
 
-    def _mapjoin_union(
-        self, new_def: TensorDef, op: FinchOperator, union_args: list[ExactStats]
-    ) -> ExactStats:
-        return self._merge_union(new_def, union_args)
-
-
     def _mapjoin_join(
         self, new_def: TensorDef, op: FinchOperator, join_args: list[ExactStats]
     ) -> ExactStats:
         if len(join_args) == 0:
-            shape = tuple(new_def.dim_sizes[f] for f in new_def.index_order)
-            empty = eager.full(shape, 0.0)
-            return ExactStats.from_tensor(new_def, empty)
+            new = eager.full(tuple(new_def.dim_sizes[f] for f in new_def.index_order), 0.0)
+            return ExactStats.from_tensor(new_def, new)
 
         join_cover = set().union(*(s.tensordef.index_order for s in join_args))
         if join_cover == set(new_def.index_order):
             return self._merge_join(new_def, join_args)
         return self._merge_union(new_def, join_args)
+
+
+    def _mapjoin_union(
+        self, new_def: TensorDef, op: FinchOperator, union_args: list[ExactStats]
+    ) -> ExactStats:
+        return self._merge_union(new_def, union_args)
 
 
     def aggregate(
@@ -115,6 +135,7 @@ class ExactStatsFactory(BaseTensorStatsFactory["ExactStats"]):
         new_def = TensorDef.relabel(stats.tensordef, relabel_indices)
         return ExactStats.from_tensor(new_def, stats.tensor)
 
+
     def reorder(
         self, stats: ExactStats, reorder_indices: tuple[Field, ...]
     ) -> ExactStats:
@@ -133,7 +154,10 @@ class ExactStats(NumericStats):
     def __init__(self, tensor, fields):
         self.tensor = tensor
         self.tensordef = TensorDef.from_tensor(tensor, fields)
-        self.nnz = float(np.count_nonzero(tensor.to_numpy() != tensor.fill_value))
+        arr = tensor.to_numpy()
+        fill = tensor.fill_value
+        self.nnz = float(np.count_nonzero(arr != fill))
+
 
 
     @classmethod
@@ -141,7 +165,9 @@ class ExactStats(NumericStats):
         obj = object.__new__(cls)
         obj.tensordef = tensordef
         obj.tensor = tensor
-        obj.nnz = float(np.count_nonzero(tensor.to_numpy() != tensor.fill_value))
+        arr = tensor.to_numpy()
+        fill = tensor.fill_value
+        obj.nnz = float(np.count_nonzero(arr != fill))
         return obj
 
 

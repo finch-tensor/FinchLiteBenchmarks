@@ -10,6 +10,8 @@ from finchlite.autoschedule.tensor_stats import (
     UniformStatsFactory,
 )
 
+from .exact_stats import ExactStats, ExactStatsFactory
+
 from ..benchmarks.cg import (
     benchmark_cg,
     dg_cg_sparse_1,
@@ -58,7 +60,6 @@ from ..benchmarks.matmul import (
     chain_matmul_vertical_stripe_10,
     chain_matmul_triangular_clash_10,
 )
-from .pure_stats import PureStats
 
 BENCHMARK_DICT = {
     "matmul": benchmark_matmul,
@@ -129,9 +130,9 @@ DATA_GENERATOR_DICT = {
     },
 }
 
-PURE_STATS_DICT = {
-    "matmul": lambda data: PureStats(*data).eager_nnz,
 
+PURE_STATS_DICT = {
+    "matmul": lambda data: benchmark_matmul(ExactStatsFactory(), *data),
 }
 
 
