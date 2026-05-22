@@ -8,6 +8,8 @@ from finchlite import ffuncs
 from finchlite.autoschedule import Aggregate, Field, Literal, MapJoin, Table
 from finchlite.autoschedule.tensor_stats import StatsInterpreter
 
+# ─────────────────────────────  matmul benchmark  ────────────────────────────
+
 
 def benchmark_matmul(stats_factory, *matrices):
     n = len(matrices)
