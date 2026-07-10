@@ -200,7 +200,7 @@ def plot(results, out_path="stats_results.png"):
                             fontsize=7,rotation=0,color="black",fontweight="bold")
  
         ax.axhline(1.0, color="black", linewidth=1.5,
-                   linestyle="--", zorder=4, label="Actual estimate")
+                   linestyle="--", zorder=4, label="Perfect estimate")
         ax.set_ylabel("log(estimated / true nnz)", fontsize=10)
         ax.set_title(kernel, fontweight="bold", fontsize=12)
         ax.set_xticks(x)
@@ -240,7 +240,39 @@ def save_csv(results, out_path="stats_results.csv"):
                         "ratio": val,
                     })
     print(f"Saved {out_path}")
- 
+
+def plot_geomean(results,out_path="stats_geomean.png"):
+    dataset_names = list(DATASETS.keys())
+
+    model_ratios = defaultdict(list)
+    for kernel in KERNELS:
+        for ds in dataset_names:
+            for model in ALL_MODEL_NAMES:
+                val = results.get(kernel,{}).get(ds,{}).get(model,None)
+                if val is not None and not np.isnan(val) and val>0:
+                    model_ratios[model].append(val)
+
+    geomeans = {}
+    for model,ratios in model_ratios.items():
+        geomeans[model] = np.exp(np.mean(np.log(ratios)))
+    
+    fig, ax = plt.subplots(figsize=(10,4))
+    x = np.arange(len(ALL_MODEL_NAMES))
+    bars = ax.bar(x,
+                  [geomeans.get(m,np.nan) for m in ALL_MODEL_NAMES],
+                  color = [COLORS.get(m,"gray") for m in ALL_MODEL_NAMES],
+                  zorder=3)
+    ax.axhline(1.0,color="black",linewidth=1.5,linestyle="--",zorder=4,label="Perfect estimate")
+    ax.set_yscale("log",base=2)
+    ax.set_xticks(x)
+    ax.set_xticklabels(ALL_MODEL_NAMES,rotation=30,ha="right",fontsize=9)
+    ax.set_ylabel("Geometric mean of estimated/true nnz", fontsize=10)
+    ax.set_title("Overall Accuracy of Estimators (Geometric Mean across all kernels and datasets)",fontweight="bold",fontsize=11)
+    ax.grid(axis="y",linestyle=":",alpha=0.5,zorder=0)
+    ax.legend(fontsize=9)
+    plt.tight_layout()
+    plt.savefig(out_path,dpi=150,bbox_inches="tight")
+    print(f"Saved {out_path}")
  
 if __name__ == "__main__":
     print("Running benchmarks...")
@@ -248,3 +280,4 @@ if __name__ == "__main__":
     print("Plotting...")
     save_csv(results,"results/stats_results.csv")
     plot(results, "results/stats_results.png")
+    plot_geomean(results,"results/stats_geomean.png")
