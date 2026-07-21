@@ -28,7 +28,7 @@ BLOCKED_MODELS = {
     "Blocked-DC" : BlockedStatsFactory(DCStatsFactory(),block_count=5,block_width=5),
     "Blocked-LP" : BlockedStatsFactory(LPStatsFactory(),block_count=5,block_width=5),
     "Blocked-Database" : BlockedStatsFactory(DatabaseStatsFactory(),block_count=5,block_width=5),
-    "Blocked-Sampling_0.5" : BlockedStatsFactory(SamplingStatsFactory(sample_prob=0.25,use_coverage=True),block_count=5,block_width=5),
+    "Blocked-Sampling_0.5" : BlockedStatsFactory(SamplingStatsFactory(sample_prob=0.25),block_count=5,block_width=5),
     
 }
 

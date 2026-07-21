@@ -13,21 +13,24 @@ import csv
 i,j,k,l = Field("i"), Field("j"),Field("k"), Field("l")
 
 ESTIMATOR_MODELS = {
-    "uj1":       SamplingStatsFactory(sample_prob=0.25, estimator="uj1",use_coverage=True),
-    "sj1":       SamplingStatsFactory(sample_prob=0.25, estimator="sj1",use_coverage=True),
-    "uj2":       SamplingStatsFactory(sample_prob=0.25, estimator="uj2",use_coverage=True),
-    "schlosser": SamplingStatsFactory(sample_prob=0.25, estimator="schlosser",use_coverage=True),
-    "sh2":       SamplingStatsFactory(sample_prob=0.25, estimator="sh2",use_coverage=True),
-    "sh3":       SamplingStatsFactory(sample_prob=0.25, estimator="sh3",use_coverage=True),
+    "uj1":       SamplingStatsFactory(sample_prob=0.25, estimator="uj1"),
+    "sj1":       SamplingStatsFactory(sample_prob=0.25, estimator="sj1"),
+    "uj2":       SamplingStatsFactory(sample_prob=0.25, estimator="uj2"),
+    "schlosser": SamplingStatsFactory(sample_prob=0.25, estimator="schlosser"),
+    "sh2":       SamplingStatsFactory(sample_prob=0.25, estimator="sh2"),
+    "sh3":       SamplingStatsFactory(sample_prob=0.25, estimator="sh3"),
+    "good1":       SamplingStatsFactory(sample_prob=0.25, estimator="good1"),
+
 }
 
 ESTIMATOR_COLORS = {
-    "uj1":       "#E41A1C",
-    "sj1":       "#FF7F00",
-    "uj2":       "#4DAF4A",
+    "uj1": "#E41A1C",
+    "sj1": "#FF7F00",
+    "uj2": "#4DAF4A",
     "schlosser": "#00BCD4",
-    "sh2":       "#A65628",
-    "sh3":       "#F781BF",
+    "sh2": "#A65628",
+    "sh3": "#F781BF",
+    "good1":  "#F3F781",
 }
 
 KERNELS = ["Hadamard", "SpGEMM", "SpGEMM2", "Triangle Counting"]
