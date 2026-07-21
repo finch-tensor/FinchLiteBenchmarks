@@ -5,7 +5,7 @@ from collections import defaultdict
 import scipy.io
 import finchlite as fl
 import finchlite.algebra.ffuncs as ffuncs
-from finchlite.autoschedule.tensor_stats import (BlockedStats,BlockedStatsFactory,DCStatsFactory,DenseStatsFactory,DenseStatsFactory,UniformStatsFactory, DatabaseStatsFactory)
+from finchlite.autoschedule.tensor_stats import (BlockedStats,BlockedStatsFactory,DCStatsFactory,DenseStatsFactory,DenseStatsFactory,UniformStatsFactory, DatabaseStatsFactory,SamplingStats,SamplingStatsFactory,LPStatsFactory)
 from finchlite.finch_logic import Field
 import csv
 
@@ -17,25 +17,35 @@ STATS_MODEL = {
     "Dense" : DenseStatsFactory(),
     "Uniform" : UniformStatsFactory(),
     "DC" : DCStatsFactory(),
+    "LP" : LPStatsFactory(),
     "Database" : DatabaseStatsFactory(),
+    "SamplingStats_0.5":SamplingStatsFactory(sample_prob=0.5,use_coverage=True),
+
 }
 
 BLOCKED_MODELS = {
     "Blocked-Uniform" : BlockedStatsFactory(UniformStatsFactory(),block_count=5,block_width=5),
     "Blocked-DC" : BlockedStatsFactory(DCStatsFactory(),block_count=5,block_width=5),
+    "Blocked-LP" : BlockedStatsFactory(LPStatsFactory(),block_count=5,block_width=5),
     "Blocked-Database" : BlockedStatsFactory(DatabaseStatsFactory(),block_count=5,block_width=5),
+    "Blocked-Sampling_0.5" : BlockedStatsFactory(SamplingStatsFactory(sample_prob=0.25,use_coverage=True),block_count=5,block_width=5),
+    
 }
 
 ALL_MODEL_NAMES = list(STATS_MODEL) + list(BLOCKED_MODELS)
 
 COLORS = {
-    "Dense":            "#4878CF",
-    "Uniform":          "#6ACC65",
-    "DC":               "#D65F5F",
-    "Database":         "#FF9F0A",
-    "Blocked-Uniform":  "#C4AD66",
-    "Blocked-DC":       "#77BEDB",
+    "Dense":"#4878CF",
+    "Uniform":"#6ACC65",
+    "DC":"#B57777",
+    "LP":"#CC2E2E",
+    "Database":"#FF9F0A",
+    "SamplingStats_0.5":"#9B59B6",   
+    "Blocked-Uniform":"#C4AD66",
+    "Blocked-DC": "#77BEDB",
+    "Blocked-LP": "#1A42BC",
     "Blocked-Database": "#A2C8A2",
+    "Blocked-Sampling_0.5": "#E7CC00", 
 }
 
 KERNELS = ["Hadamard", "SpGEMM", "SpGEMM2", "Triangle Counting"]
@@ -60,7 +70,7 @@ def make_striped(n):
     A[:,::5] = 1
     return A
 
-def load_snap_matrix(path,n_max=200):
+def load_snap_matrix(path,n_max=50):
     mat = scipy.io.loadmat(path)
     A_sparse = mat["Problem"]["A"][0,0][:n_max,:n_max]
     A_dense = A_sparse.toarray()
@@ -132,7 +142,7 @@ def est_triangle(factory, tns_a):
     s_a3 = factory(tns_a, (i, j))
     return factory.mapjoin(ffuncs.mul, mm, s_a3).estimate_non_fill_values()
 
-#running benchmarks 
+#running benchmark
 def run():
     results = defaultdict(lambda:defaultdict(dict))
 
@@ -186,29 +196,47 @@ def plot(results, out_path="stats_results.png"):
             ]
             offset = (mi - n_models / 2 + 0.5) * bar_w
 
-            display_ratios = [min(r,Y_MAX) if not np.isnan(r) else np.nan for r in ratios]
+            Y_MAX_LOG = 10
+            Y_MIN_LOG = -10
+            log_ratios = [np.log2(r) if (not np.isnan(r) and r > 0) else np.nan for r in ratios]
+            display_ratios = [np.clip(r, Y_MIN_LOG, Y_MAX_LOG) if not np.isnan(r) else np.nan for r in log_ratios]
             bars = ax.bar(x + offset, display_ratios, width=bar_w,
                    color=COLORS.get(model_name, "gray"),
                    label=model_name, zorder=3)
-            
-            for bar,ratio in zip(bars,ratios):
-                if not np.isnan(ratio) and ratio > Y_MAX:
+
+            for bar, log_r in zip(bars, log_ratios):
+                if not np.isnan(log_r) and log_r > Y_MAX_LOG:
                     ax.text(bar.get_x() + bar.get_width()/2,
-                            Y_MAX*1.1,
-                            f"2^{np.log2(ratio):.1f}",
-                            ha="center",va="bottom",
-                            fontsize=7,rotation=0,color="black",fontweight="bold")
+                            Y_MAX_LOG * 0.95,
+                            f"+{log_r:.1f}",
+                            ha="center", va="top",
+                            fontsize=7, color="black", fontweight="bold")
+                elif not np.isnan(log_r) and log_r < Y_MIN_LOG:
+                    ax.text(bar.get_x() + bar.get_width()/2,
+                            Y_MIN_LOG * 0.95,
+                            f"{log_r:.1f}",
+                            ha="center", va="bottom",
+                            fontsize=7, color="black", fontweight="bold")
+                    
+            for bar, log_r in zip(bars, log_ratios):
+                if not np.isnan(log_r) and abs(log_r) < 0.1:
+                    ax.plot(bar.get_x() + bar.get_width()/2, 0,
+                            marker="x", color=COLORS.get(model_name, "gray"),
+                            markersize=10, zorder=5)
  
-        ax.axhline(1.0, color="black", linewidth=1.5,
-                   linestyle="--", zorder=4, label="Perfect estimate")
+        ax.axhline(0, color="black", linewidth=1.5, linestyle="--", zorder=4, label="Perfect estimate (ratio=1)")
         ax.set_ylabel("log(estimated / true nnz)", fontsize=10)
         ax.set_title(kernel, fontweight="bold", fontsize=12)
         ax.set_xticks(x)
         ax.set_xticklabels(dataset_names, rotation=30, ha="right", fontsize=9)
         ax.grid(axis="y", linestyle=":", alpha=0.5, zorder=0)
-        ax.set_yscale("log",base=2)
-        ax.set_ylim(2**-4,Y_MAX*1.5)
-        ax.set_ylabel("estimated/true nnz (log scale)", fontsize=10)
+        ax.set_ylim(Y_MIN_LOG, Y_MAX_LOG)
+        ax.axhline(0, color="black", linewidth=1.5, linestyle="--", zorder=4)
+        ax.axhline(1,  color="gray", linewidth=0.5, linestyle=":", alpha=0.4)
+        ax.axhline(-1, color="gray", linewidth=0.5, linestyle=":", alpha=0.4)
+        ax.axhline(2,  color="gray", linewidth=0.5, linestyle=":", alpha=0.4)
+        ax.axhline(-2, color="gray", linewidth=0.5, linestyle=":", alpha=0.4)
+        ax.set_ylabel("log2(estimated / true nnz)", fontsize=9)
 
  
         if kernel == KERNELS[0]:
@@ -250,7 +278,8 @@ def plot_geomean(results,out_path="stats_geomean.png"):
             for model in ALL_MODEL_NAMES:
                 val = results.get(kernel,{}).get(ds,{}).get(model,None)
                 if val is not None and not np.isnan(val) and val>0:
-                    model_ratios[model].append(val)
+                    q_error = max(val,1.0/val)
+                    model_ratios[model].append(q_error)
 
     geomeans = {}
     for model,ratios in model_ratios.items():
@@ -266,8 +295,8 @@ def plot_geomean(results,out_path="stats_geomean.png"):
     ax.set_yscale("log",base=2)
     ax.set_xticks(x)
     ax.set_xticklabels(ALL_MODEL_NAMES,rotation=30,ha="right",fontsize=9)
-    ax.set_ylabel("Geometric mean of estimated/true nnz", fontsize=10)
-    ax.set_title("Overall Accuracy of Estimators (Geometric Mean across all kernels and datasets)",fontweight="bold",fontsize=11)
+    ax.set_ylabel("Geometric mean of q-error", fontsize=10)
+    ax.set_title("Overall Accuracy of Estimators (Geometric Mean q-error across all kernels and datasets)",fontweight="bold",fontsize=11)
     ax.grid(axis="y",linestyle=":",alpha=0.5,zorder=0)
     ax.legend(fontsize=9)
     plt.tight_layout()
@@ -275,7 +304,7 @@ def plot_geomean(results,out_path="stats_geomean.png"):
     print(f"Saved {out_path}")
  
 if __name__ == "__main__":
-    print("Running benchmarks...")
+    print("Running benchmark...")
     results = run()
     print("Plotting...")
     save_csv(results,"results/stats_results.csv")
