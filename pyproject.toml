@@ -1,11 +1,11 @@
 [project]
 name = "finch-lite-benchmarks"
-description = "Benchmarks for finch-tensor-lite"
+description = "Benchmarks for finch-tensor"
 version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "finch-tensor-lite @ git+https://github.com/finch-tensor/finch-tensor-lite.git",
+    "finch-tensor",
     "numpy",
     "matplotlib (>=3.10.9,<4.0.0)",
 ]
@@ -17,11 +17,43 @@ test = [
 ]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.11.25"]
+build-backend = "uv_build"
 
-[tool.poetry]
-packages = [{include = "finchlitebench", from = "src"}]
+[tool.uv.build-backend]
+module-name = "finchtensorbench"
+module-root = "src"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+requires-pixi = ">=0.71.0"
+
+[tool.pixi.dependencies]
+python = ">=3.11,<3.14"
+numpy = "*"
+matplotlib = ">=3.10.9,<4"
+scipy = "*"
+
+[tool.pixi.pypi-dependencies]
+finch-tensor = { git = "https://github.com/finch-tensor/finch-tensor-lite.git", extras = ["julia"] }
+ssgetpy = ">=1.0rc2"
+
+[tool.pixi.feature.test.dependencies]
+pytest = ">=7.4.4"
+pytest-cov = "*"
+
+[tool.pixi.environments]
+test = { features = ["test"] }
+
+[tool.pixi.activation.env]
+PYTHONPATH = "src"
+
+[tool.pixi.tasks]
+uniform-stats = "python -m finchtensorbench.benchmarks.uniform_stats"
+
+[tool.pixi.feature.test.tasks]
+test = "pytest"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

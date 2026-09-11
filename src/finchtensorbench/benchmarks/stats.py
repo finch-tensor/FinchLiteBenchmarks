@@ -6,9 +6,9 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-import finchlite as fl
-from finchlite import ffuncs as ffunc
-from finchlite.autoschedule.tensor_stats import (
+import finch as fl
+from finch import ffuncs as ffunc
+from finch.autoschedule.tensor_stats import (
     BlockedStats,
     BlockedStatsFactory,
     DatabaseStatsFactory,
@@ -16,7 +16,7 @@ from finchlite.autoschedule.tensor_stats import (
     DenseStatsFactory,
     UniformStatsFactory,
 )
-from finchlite.finch_logic import Field
+from finch.finch_logic import Field
 
 INNER_FACTORIES = [
     ("DenseStats", DenseStatsFactory()),
@@ -26,7 +26,7 @@ INNER_FACTORIES = [
 ]
 
 MATRIX_TYPES = ["diagonal", "tridiagonal", "banded", "triangular", "striped"]
-CSV_PATH = "benchmarks/stats_errors.csv"
+CSV_PATH = "results/stats_errors.csv"
 
 
 def load_errors():
@@ -159,7 +159,7 @@ def plot(errors):
     ax.legend(title="matrix type", ncol=3)
     plt.tight_layout()
 
-    out = "benchmarks/stats_chart.png"
+    out = "results/stats_chart.png"
     plt.savefig(out, dpi=150)
     print(f"Saved {out}")
 

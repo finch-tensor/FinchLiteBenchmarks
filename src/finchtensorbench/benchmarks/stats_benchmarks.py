@@ -3,13 +3,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
 import scipy.io
-import finchlite as fl
-import finchlite.algebra.ffuncs as ffuncs
-from finchlite.autoschedule.tensor_stats import (BlockedStats,BlockedStatsFactory,DCStatsFactory,DenseStatsFactory,DenseStatsFactory,UniformStatsFactory, DatabaseStatsFactory)
-from finchlite.finch_logic import Field
+import finch as fl
+import finch.algebra.ffuncs as ffuncs
+from finch.autoschedule.tensor_stats import (BlockedStats,BlockedStatsFactory,DCStatsFactory,DenseStatsFactory,DenseStatsFactory,UniformStatsFactory, DatabaseStatsFactory)
+from finch.finch_logic import Field
 import csv
 
-#Defining fields 
+#Defining fields
 i,j,k,l = Field("i"), Field("j"),Field("k"), Field("l")
 
 #Stats models
@@ -77,7 +77,7 @@ DATASETS = {
     "Banded":      lambda: make_banded(N),
     "Triangular":  lambda: make_triangular(N),
     "Striped":     lambda: make_striped(N),
-  
+
     #snap matrices
     "ca-GrQc" : lambda:load_snap_matrix("tests/data/ca-GrQc.mat"),
     "ca-HepTh": lambda: load_snap_matrix("tests/data/ca-HepTh.mat"),
@@ -103,7 +103,7 @@ def actual_triangle(A):
     C = A.astype(bool).astype(float)@ A.astype(bool).astype(float)
     return max(int(np.count_nonzero(C*A)),1)
 
-#stats estimate 
+#stats estimate
 def est_hadamard(factory,tns_a,tns_b):
     s_a = factory(tns_a,(i,j))
     s_b = factory(tns_b,(i,j))
@@ -114,7 +114,7 @@ def est_spgemm(factory, tns_a, tns_b):
     s_b = factory(tns_b, (k, j))
     mm  = factory.mapjoin(ffuncs.mul, s_a, s_b)
     return factory.aggregate(ffuncs.add, 0.0, (k,), mm).estimate_non_fill_values()
- 
+
 def est_spgemm2(factory, tns_a, tns_b):
     s_a  = factory(tns_a, (i, l))
     s_b1 = factory(tns_b, (l, k))
@@ -123,7 +123,7 @@ def est_spgemm2(factory, tns_a, tns_b):
     s_b2 = factory(tns_b, (k, j))
     mm2  = factory.mapjoin(ffuncs.mul, mm1, s_b2)
     return factory.aggregate(ffuncs.add, 0.0, (k,), mm2).estimate_non_fill_values()
- 
+
 def est_triangle(factory, tns_a):
     s_a1 = factory(tns_a, (i, k))
     s_a2 = factory(tns_a, (k, j))
@@ -132,7 +132,7 @@ def est_triangle(factory, tns_a):
     s_a3 = factory(tns_a, (i, j))
     return factory.mapjoin(ffuncs.mul, mm, s_a3).estimate_non_fill_values()
 
-#running benchmarks 
+#running benchmarks
 def run():
     results = defaultdict(lambda:defaultdict(dict))
 
@@ -173,12 +173,12 @@ def plot(results, out_path="stats_results.png"):
     bar_w = 0.09
     x = np.arange(len(dataset_names))
     Y_MAX = 2**10
- 
+
     fig, axes = plt.subplots(len(KERNELS), 1, figsize=(18, 4.5 * len(KERNELS)))
- 
+
     for ax, kernel in zip(axes, KERNELS):
         kernel_data = results.get(kernel, {})
- 
+
         for mi, model_name in enumerate(ALL_MODEL_NAMES):
             ratios = [
                 kernel_data.get(ds, {}).get(model_name, np.nan)
@@ -190,7 +190,7 @@ def plot(results, out_path="stats_results.png"):
             bars = ax.bar(x + offset, display_ratios, width=bar_w,
                    color=COLORS.get(model_name, "gray"),
                    label=model_name, zorder=3)
-            
+
             for bar,ratio in zip(bars,ratios):
                 if not np.isnan(ratio) and ratio > Y_MAX:
                     ax.text(bar.get_x() + bar.get_width()/2,
@@ -198,7 +198,7 @@ def plot(results, out_path="stats_results.png"):
                             f"2^{np.log2(ratio):.1f}",
                             ha="center",va="bottom",
                             fontsize=7,rotation=0,color="black",fontweight="bold")
- 
+
         ax.axhline(1.0, color="black", linewidth=1.5,
                    linestyle="--", zorder=4, label="Perfect estimate")
         ax.set_ylabel("log(estimated / true nnz)", fontsize=10)
@@ -210,12 +210,12 @@ def plot(results, out_path="stats_results.png"):
         ax.set_ylim(2**-4,Y_MAX*1.5)
         ax.set_ylabel("estimated/true nnz (log scale)", fontsize=10)
 
- 
+
         if kernel == KERNELS[0]:
             ax.legend(loc="upper left", bbox_to_anchor=(1.01,1),
                        fontsize=8, ncol=1,
                       framealpha=0.9, title="Stats model",borderaxespad=0)
- 
+
     fig.suptitle(
         "Sparsity Estimator Accuracy across Kernels and Datasets\n",
         fontsize=12, fontweight="bold",
@@ -223,7 +223,7 @@ def plot(results, out_path="stats_results.png"):
     plt.tight_layout(rect=[0,0,0.85,1])
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     print(f"Saved {out_path}")
- 
+
 def save_csv(results, out_path="stats_results.csv"):
     dataset_names = list(DATASETS.keys())
     with open(out_path, "w", newline="") as f:
@@ -255,7 +255,7 @@ def plot_geomean(results,out_path="stats_geomean.png"):
     geomeans = {}
     for model,ratios in model_ratios.items():
         geomeans[model] = np.exp(np.mean(np.log(ratios)))
-    
+
     fig, ax = plt.subplots(figsize=(10,4))
     x = np.arange(len(ALL_MODEL_NAMES))
     bars = ax.bar(x,
@@ -273,11 +273,11 @@ def plot_geomean(results,out_path="stats_geomean.png"):
     plt.tight_layout()
     plt.savefig(out_path,dpi=150,bbox_inches="tight")
     print(f"Saved {out_path}")
- 
+
 if __name__ == "__main__":
     print("Running benchmarks...")
     results = run()
     print("Plotting...")
-    save_csv(results,"results/stats_results.csv")
+    save_csv(results, "results/stats_results.csv")
     plot(results, "results/stats_results.png")
-    plot_geomean(results,"results/stats_geomean.png")
+    plot_geomean(results, "results/stats_geomean.png")
