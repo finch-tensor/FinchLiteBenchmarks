@@ -4,7 +4,10 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+import finch as ft
+import numpy as np
 import scipy.io
+from finch.autoschedule import COMPILE_JULIA, with_default_scheduler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = PROJECT_ROOT / "tests" / "data"
@@ -18,50 +21,54 @@ MATRIX: dict[str, str] = {
     "ct20stif": "Boeing",
 }
 
-
-def actual_hadamard(a, b):
-    return max(a.multiply(b).nnz, 1)
-
-
-def actual_spgemm(a, b):
-    return max((a @ b).nnz, 1)
+def act_hadamard(a, b):
+    return ft.count_nonzero(ft.multiply(a, b))
 
 
-def actual_spgemm2(a, b):
-    return max(((a @ b) @ b).nnz, 1)
+def act_spgemm(a, b):
+    return ft.count_nonzero(ft.matmul(a, b))
 
 
-def actual_triangle(a):
-    return max((a @ a).multiply(a).nnz, 1)
+def act_spgemm2(a, b):
+    return ft.count_nonzero(ft.matmul(ft.matmul(a, b), b))
+
+
+def act_triangle(a):
+    return ft.count_nonzero(ft.multiply(ft.matmul(a, a), a))
+
 
 
 KERNELS: dict[str, tuple[Callable[..., int], int]] = {
-    "hadamard": (actual_hadamard, 2),
-    "spgemm": (actual_spgemm, 2),
-    "spgemm-2": (actual_spgemm2, 2),
-    "triangle": (actual_triangle, 1),
+    "hadamard": (act_hadamard, 2),
+    "spgemm": (act_spgemm, 2),
+    "spgemm-2": (act_spgemm2, 2),
+    "triangle": (act_triangle, 1),
 }
 
 
-def load_matrix(name: str):
-    path = DATA_DIR / f"{name}.mat"
-    mat = scipy.io.loadmat(path)
-    return mat["Problem"]["A"][0, 0].tocsr()
-
-
-def parse_args():
+def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matrix", choices=MATRIX, default="ct20stif")
     parser.add_argument("--repeat", type=int, default=5)
     parser.add_argument("--pause", type=float, default=5.0, help="seconds between kernel tests")
-    return parser.parse_args()
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="disable Finch's compiled-kernel cache, forcing a fresh Julia "
+        "compile on every call instead of just the warm-up",
+    )
+    args = parser.parse_args()
 
+    if args.no_cache:
+        COMPILE_JULIA.ctx.cache = False
 
-def main():
-    args = parse_args()
-    matrix = load_matrix(args.matrix)
-    pattern = matrix.astype(bool)
-    pattern.eliminate_zeros()
+    path = DATA_DIR / f"{args.matrix}.mat"
+    data = scipy.io.loadmat(path)
+    matrix = data["Problem"]["A"][0, 0].tocsr()
+    mat = matrix.astype(bool).astype(np.int64)
+    mat.eliminate_zeros()
+    mat.indices = mat.indices.astype(np.int64)
+    mat.indptr = mat.indptr.astype(np.int64)
 
     print(
         f"matrix={MATRIX[args.matrix]}/{args.matrix} "
@@ -72,16 +79,23 @@ def main():
         if index:
             time.sleep(args.pause)
 
-        operands = [pattern] * operand_count
-        result = 0
+        operands = [mat] * operand_count
+
+        # Warm up
+        if not args.no_cache:
+            with with_default_scheduler(COMPILE_JULIA):
+                function(*operands)
+
+        result = None
         timings = []
         for _ in range(args.repeat):
             start = time.perf_counter()
-            result = function(*operands)
+            with with_default_scheduler(COMPILE_JULIA):
+                result = function(*operands)
             timings.append(time.perf_counter() - start)
 
         print(
-            f"{name:10} result={result:<12} "
+            f"{name:10} result={result} "
             f"min={min(timings):.6f}s "
             f"mean={statistics.fmean(timings):.6f}s "
             f"median={statistics.median(timings):.6f}s"
