@@ -1,12 +1,15 @@
-"""Implementation of the shared autoscheduler benchmark setup.
+"""Runner for the autoscheduler benchmarks.
 
-Benchmark files import the public API from ``initialization.py`` and only need
-to define:
+Query files live under ``queries/`` and ``queries_lite/``.  They describe
+*what* to time.  This module describes *how* to time it:
 
-* a query builder,
-* an input builder,
-* its named cases,
-* a ``BenchmarkSpec`` passed to ``run_cli``.
+1. Build a Finch scheduler with optional stage timers.
+2. Call ``fl.compute(query(...), ctx=scheduler)``.
+3. Isolate each loop/logic pair in a worker process.
+4. Write raw samples and a summary CSV.
+
+Run a registered workload with:
+``python -m finchlitebench.benchmarks.autoschedule.initialization chain_lite``.
 """
 
 from __future__ import annotations
@@ -24,50 +27,62 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Callable, Sequence
+from typing import Sequence
 
 import finch as fl
 from finch.autoschedule import default_schedulers
-from finch.autoschedule import (
-    Aggregate,
-    DefaultLogicFormatter,
-    DefaultLogicOptimizer,
-    DefaultLoopOrderer,
-    LogicCompiler,
-    LogicExecutor,
-    LogicNormalizer,
-    Reorder,
+from finch.autoschedule.compiler import CompilerFormLowerer, LogicCompiler
+from finch.autoschedule.executor import LogicExecutor
+from finch.autoschedule.factorizer.galley_factorizer.galley_optimize import (
+    GalleyLogicFactorizer,
 )
-from finch.autoschedule.galley_optimize import GalleyLogicalOptimizer
-from finch.autoschedule.loop_order_bnb import BFSLoopOrderer
-from finch.autoschedule.loop_order_greedy import GreedyLoopOrderer
+from finch.autoschedule.factorizer.optimize import DefaultLogicFactorizer
+from finch.autoschedule.formatter import DefaultLogicFormatter
+from finch.autoschedule.loop_orderer.loop_order_bnb import (
+    BFSLoopOrderer,
+    DFSLoopOrderer,
+)
+from finch.autoschedule.loop_orderer.loop_order_greedy import GreedyLoopOrderer
+from finch.autoschedule.loop_orderer.loop_ordering import DefaultLoopOrderer
+from finch.autoschedule.normalize import LogicNormalizer
 from finch.autoschedule.tensor_stats import (
     DCStatsFactory,
     FDStatsFactory,
     UniformStatsFactory,
 )
-from finch.finch_logic import LogicSimplify, MockLogicLoader
-from finch.finch_notation.interpreter import NotationInterpreter
+from finch.compile_jl.compiler import FinchJLCompiler
+from finch.finch_logic import Aggregate, LogicSimplify, MockLogicLoader, Reorder
+
+from .spec import (
+    BENCHMARK_MODULES,
+    BenchmarkCase as BenchmarkCase,
+    BenchmarkSpec as BenchmarkSpec,
+    cases_from_shapes as cases_from_shapes,
+    load_benchmark,
+    make_spec as make_spec,
+)
 
 
 LOOP_ORDERERS = {
     "default": DefaultLoopOrderer,
     "greedy": GreedyLoopOrderer,
     "bfs": BFSLoopOrderer,
+    "dfs": DFSLoopOrderer,
 }
 LOGIC_ORDERERS = ("default", "galley-greedy", "galley-bfs", "galley-dfs")
 STATS_FACTORIES = {"dc": DCStatsFactory, "uniform": UniformStatsFactory}
 MODES = ("scheduler", "end-to-end")
+RUNNER_MODULE = "finchlitebench.benchmarks.autoschedule.initialization"
 
-# Finch otherwise chooses Julia for internal statistics whenever optional Julia
-# packages happen to be installed.  Pinning this helper to the Python backend
-# keeps benchmark setup reproducible and avoids Julia installation in workers.
+# Use Julia for sparse statistics, with dense intermediate/output storage.
 default_schedulers.NON_RECURSIVE_SCHEDULER = LogicNormalizer(
     LogicExecutor(
-        DefaultLogicOptimizer(
+        DefaultLogicFactorizer(
             LogicSimplify(
                 DefaultLoopOrderer(
-                    DefaultLogicFormatter(LogicCompiler(NotationInterpreter()))
+                    DefaultLogicFormatter(
+                        CompilerFormLowerer(LogicCompiler(FinchJLCompiler()))
+                    )
                 )
             )
         ),
@@ -77,34 +92,9 @@ default_schedulers.NON_RECURSIVE_SCHEDULER = LogicNormalizer(
 )
 
 
-@dataclass(frozen=True)
-class BenchmarkCase:
-    name: str
-    shape: tuple[int, ...]
-    pattern: str
-    seed: int = 0
-
-
-@dataclass(frozen=True)
-class BenchmarkSpec:
-    name: str
-    module: str
-    query: Callable
-    inputs: Callable[[BenchmarkCase], tuple]
-    cases: tuple[BenchmarkCase, ...]
-    scheduler_cases: tuple[str, ...]
-    end_to_end_cases: tuple[str, ...]
-    results_dir: Path
-    output_count: int = 1
-    rounds: int = 2
-    scheduler_warmups: int = 2
-    scheduler_runs: int = 10
-    end_to_end_warmups: int = 1
-    end_to_end_runs: int = 3
-
-    @property
-    def cases_by_name(self):
-        return {case.name: case for case in self.cases}
+# ---------------------------------------------------------------------------
+# Scheduler construction
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -206,9 +196,9 @@ def build_scheduler(
     """Build the common Finch scheduler pipeline."""
     timer, captures = StageTimer(), {}
     downstream = (
-        DefaultLogicFormatter(LogicCompiler(NotationInterpreter()))
+        DefaultLogicFormatter(CompilerFormLowerer(LogicCompiler(FinchJLCompiler())))
         if execute
-        else _PlanningOnlyLoader(output_count)
+        else DefaultLogicFormatter(_PlanningOnlyLoader(output_count))
     )
     downstream = _CaptureStage(downstream, "loop_prgm", captures)
     loop_stage = LOOP_ORDERERS[loop_order](downstream)
@@ -218,9 +208,9 @@ def build_scheduler(
         captures,
     )
     logic_stage = (
-        DefaultLogicOptimizer(logic_downstream)
+        DefaultLogicFactorizer(logic_downstream)
         if logic_order == "default"
-        else GalleyLogicalOptimizer(
+        else GalleyLogicFactorizer(
             logic_downstream, optimizer=logic_order.removeprefix("galley-")
         )
     )
@@ -232,6 +222,11 @@ def build_scheduler(
     )
     context.timer, context.captures = timer, captures
     return context
+
+
+# ---------------------------------------------------------------------------
+# Measurement
+# ---------------------------------------------------------------------------
 
 
 def _field_names(fields):
@@ -266,12 +261,12 @@ def measure_samples(spec, inputs, context, warmups, runs):
     """Warm up and retain every measurement rather than only an average."""
     if warmups < 0 or runs < 1:
         raise ValueError("warmups must be nonnegative and runs must be positive")
-    inputs = tuple(fl.asarray(value) for value in inputs)
+    inputs = tuple(fl.defer(fl.asarray(value)) for value in inputs)
 
     def measure():
         context.timer.reset()
         started = time.perf_counter()
-        context(spec.query(*inputs))
+        fl.compute(spec.query(*inputs), ctx=context)
         pipeline = time.perf_counter() - started
         return BenchmarkResult(
             context.timer.times["loop_orderer"],
@@ -284,6 +279,11 @@ def measure_samples(spec, inputs, context, warmups, runs):
     for _ in range(warmups):
         measure()
     return [measure() for _ in range(runs)]
+
+
+# ---------------------------------------------------------------------------
+# Records and summaries
+# ---------------------------------------------------------------------------
 
 
 RAW_FIELDS = (
@@ -354,9 +354,7 @@ def _worker_records(spec, args):
                 execute=mode == "end-to-end",
                 output_count=spec.output_count,
             )
-            samples = measure_samples(
-                spec, spec.inputs(case), context, warmups, runs
-            )
+            samples = measure_samples(spec, spec.inputs(case), context, warmups, runs)
             for number, result in enumerate(samples, 1):
                 records.append(
                     {
@@ -438,13 +436,19 @@ def _append_csv(path, fields, rows):
         csv.DictWriter(file, fieldnames=fields).writerows(rows)
 
 
+# ---------------------------------------------------------------------------
+# Parent process and CLI
+# ---------------------------------------------------------------------------
+
+
 def _run_worker(spec, args, loop, logic, round_number):
     with tempfile.TemporaryDirectory(prefix=f"{spec.name}-benchmark-") as folder:
         output = Path(folder) / "records.json"
         command = [
             sys.executable,
             "-m",
-            spec.module,
+            RUNNER_MODULE,
+            spec.name,
             "--worker-output",
             str(output),
             "--loop-order",
@@ -515,8 +519,19 @@ def run_benchmark(spec, args):
     return raw_path, summary_path
 
 
-def run_cli(spec, argv=None):
+def run_cli(spec=None, argv=None):
     """Parse the common CLI and run either the parent or worker process."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if spec is None:
+        if not argv or argv[0] in {"-h", "--help"}:
+            parser = argparse.ArgumentParser(
+                description="Run a registered Finch autoscheduler benchmark"
+            )
+            parser.add_argument("benchmark", choices=tuple(BENCHMARK_MODULES))
+            parser.print_help()
+            return
+        spec = load_benchmark(argv.pop(0))
+
     case_names = tuple(spec.cases_by_name)
     parser = argparse.ArgumentParser(description=f"Benchmark {spec.name}")
     parser.add_argument("--rounds", type=int, default=spec.rounds)
@@ -541,9 +556,7 @@ def run_cli(spec, argv=None):
         choices=case_names,
         default=list(spec.end_to_end_cases),
     )
-    parser.add_argument(
-        "--scheduler-warmups", type=int, default=spec.scheduler_warmups
-    )
+    parser.add_argument("--scheduler-warmups", type=int, default=spec.scheduler_warmups)
     parser.add_argument("--scheduler-runs", type=int, default=spec.scheduler_runs)
     parser.add_argument(
         "--end-to-end-warmups", type=int, default=spec.end_to_end_warmups
@@ -572,3 +585,7 @@ def run_cli(spec, argv=None):
         f"end-to-end {args.end_to_end_warmups}+{args.end_to_end_runs}"
     )
     run_benchmark(spec, args)
+
+
+if __name__ == "__main__":
+    run_cli()

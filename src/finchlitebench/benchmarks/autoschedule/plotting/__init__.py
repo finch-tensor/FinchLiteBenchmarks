@@ -8,8 +8,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-LOOP_ORDER = ("default", "greedy", "bfs")
+LOOP_ORDER = ("default", "greedy", "bfs", "dfs")
 LOGIC_ORDER = ("default", "galley-greedy", "galley-bfs", "galley-dfs")
+PIPELINE_TITLES = {
+    "scheduler": "Complete planning time",
+    "end-to-end": "Complete time (planning + execution)",
+}
 
 
 def plot_results(name, results_dir, argv=None):
@@ -44,9 +48,9 @@ def plot_results(name, results_dir, argv=None):
         width = 0.8 / len(workloads)
         figure, axes = plt.subplots(3, 1, figsize=(14, 11), constrained_layout=True)
         metrics = (
-            ("logic_s", "Logic optimizer"),
-            ("loop_s", "Loop orderer"),
-            ("pipeline_s", "Complete mode pipeline"),
+            ("logic_s", "Logic optimizer planning time"),
+            ("loop_s", "Loop orderer planning time"),
+            ("pipeline_s", PIPELINE_TITLES.get(mode, "Complete mode pipeline")),
         )
 
         for axis, (metric, title) in zip(axes, metrics, strict=True):
@@ -85,7 +89,10 @@ def plot_results(name, results_dir, argv=None):
             axis.set_ylabel("seconds (median, IQR)")
             axis.set_xticks(x)
             axis.set_xticklabels(
-                [f"{loop}\n{logic}" for loop, logic in configurations],
+                [
+                    f"loop-optimizer: {loop}\nlogic-optimizer: {logic}"
+                    for loop, logic in configurations
+                ],
                 rotation=45,
                 ha="right",
                 fontsize=8,
