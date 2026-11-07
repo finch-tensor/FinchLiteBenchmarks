@@ -1,3 +1,10 @@
+"""Compare estimators using Finch's shared benchmark cases.
+
+The three real matrices are loaded by finch.tests.stats_cases.load_matrix_market
+from Finch's bundled test data. Structured and random cases use its shared
+generators.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -93,7 +100,15 @@ def accuracy_results():
     datasets = {}
     for dataset, make_matrix in DATASETS:
         a = sps.csr_array(make_matrix())
-        datasets[dataset] = {"shape": list(a.shape), "nnz": int(a.nnz)}
+        datasets[dataset] = {
+            "shape": list(a.shape),
+            "nnz": int(a.nnz),
+            "source": (
+                f"finch.tests.data/{dataset}.mtx"
+                if dataset in GEOMEAN_DATASETS
+                else "finch.tests.stats_cases"
+            ),
+        }
         tensor = ft.asarray(a)
         logging.getLogger(__name__).info("Computing reference counts for %s", dataset)
         actual = actual_nonzeros(a)
@@ -225,8 +240,8 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(__file__).resolve().parents[3] / "graph" / "pldi_stats",
-        help="Directory for JSON results and PNG plots (default: graph/pldi_stats)",
+        default=Path(__file__).resolve().parents[3] / "graph" / "stats_comparison",
+        help="Directory for JSON results and PNG plots (default: graph/stats_comparison)",
     )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
