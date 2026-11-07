@@ -1,7 +1,5 @@
-"""Minute-scale version of the star benchmark."""
-
-from ..queries.star import star_inputs, star_query
-from ..spec import BenchmarkCase, make_spec
+from finchlitebench.benchmarks.autoschedule.queries.star import star_inputs, star_query
+from finchlitebench.benchmarks.autoschedule.spec import BenchmarkCase, make_spec
 
 
 CASES = (

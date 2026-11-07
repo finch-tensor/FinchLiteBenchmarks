@@ -1,7 +1,8 @@
-"""Minute-scale version of the tensor-contraction benchmark."""
-
-from ..queries.tensor_contraction import contraction_inputs, contraction_query
-from ..spec import BenchmarkCase, make_spec
+from finchlitebench.benchmarks.autoschedule.queries.tensor_contraction import (
+    contraction_inputs,
+    contraction_query,
+)
+from finchlitebench.benchmarks.autoschedule.spec import BenchmarkCase, make_spec
 
 
 CASES = (

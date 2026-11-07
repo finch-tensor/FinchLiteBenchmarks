@@ -1,7 +1,8 @@
-"""Minute-scale version of the diamond benchmark."""
-
-from ..queries.diamond import diamond_inputs, diamond_query
-from ..spec import BenchmarkCase, make_spec
+from finchlitebench.benchmarks.autoschedule.queries.diamond import (
+    diamond_inputs,
+    diamond_query,
+)
+from finchlitebench.benchmarks.autoschedule.spec import BenchmarkCase, make_spec
 
 
 CASES = (

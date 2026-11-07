@@ -1,17 +1,22 @@
-"""Shared input helpers for the autoscheduler query files."""
+"""Random input data shared by the query files."""
 
 import numpy as np
 
 import finch as fl
 
-from ..spec import BenchmarkCase, cases_from_shapes
+from finchlitebench.benchmarks.autoschedule.spec import BenchmarkCase
 
 
 DENSITIES = {"dense": 0.9, "sparse": 0.1}
 
 
+def density(case):
+    """Fraction of nonzeros: the case's own density, else its pattern's default."""
+    return DENSITIES.get(case.pattern) if case.density is None else case.density
+
+
 def _sparse_tensor(array):
-    # Compressed fibers avoid Julia COO failures on rectangular and 3D inputs.
+    """Compress a numpy array into a sparse Finch tensor."""
     nonzero = array != 0
     counts = np.count_nonzero(nonzero, axis=-1).reshape(-1)
     ptr = np.concatenate((np.array([0], dtype=np.int64), np.cumsum(counts)))
@@ -31,38 +36,54 @@ def _sparse_tensor(array):
 
 
 def random_tensors(case, *shapes):
-    """Build random 0/1 tensors using the case seed and density pattern."""
+    """One random 0/1 tensor per shape, stored sparse for "sparse" cases."""
     rng = np.random.default_rng(case.seed)
-    density = DENSITIES[case.pattern]
-    arrays = tuple((rng.random(shape) < density).astype(np.float64) for shape in shapes)
-    return (
-        tuple(_sparse_tensor(array) for array in arrays)
-        if case.pattern == "sparse"
-        else arrays
+    arrays = tuple(
+        (rng.random(shape) < density(case)).astype(np.float64) for shape in shapes
     )
+    if case.pattern == "sparse":
+        return tuple(_sparse_tensor(array) for array in arrays)
+    return arrays
 
 
-def random_graph(case, edge_count):
-    """One symmetric 0/1 adjacency matrix without self loops, once per query edge.
-
-    Subgraph matching joins the same data graph once for every query edge, so
-    every einsum operand is the same matrix.
-    """
+def labelled_graph(case):
+    """Random graph (E0, E1, V, P): two edge labels, type-0 mask, pinned vertex."""
     n = case.shape[0]
     rng = np.random.default_rng(case.seed)
-    upper = np.triu(rng.random((n, n)) < DENSITIES[case.pattern], k=1)
-    graph = (upper | upper.T).astype(np.float64)
+    upper = np.triu(rng.random((n, n)) < density(case), k=1)
+    label = rng.integers(2, size=(n, n))
+    E0 = upper & (label == 0)
+    E1 = upper & (label == 1)
+    E0, E1 = ((E | E.T).astype(np.float64) for E in (E0, E1))
+    V = (rng.integers(2, size=n) == 0).astype(np.float64)
+    P = np.zeros(n)
+    P[rng.integers(n)] = 1.0
+    arrays = (E0, E1, V, P)
     if case.pattern == "sparse":
-        graph = _sparse_tensor(graph)
-    return (graph,) * edge_count
+        return tuple(_sparse_tensor(array) for array in arrays)
+    return arrays
 
 
-def graph_cases(sizes, end_to_end_size, end_to_end_seed=0):
-    """Dense and sparse graphs per size, plus one dense ``e2e`` graph.
-
-    The default plan loops over every query vertex at once, so end-to-end time
-    grows like n ** vertices; ``end_to_end_size`` keeps that bounded per query.
-    """
-    return cases_from_shapes({f"n{n}": (n,) for n in sizes}) + (
+def graph_cases(
+    sizes,
+    patterns=("dense", "sparse"),
+    degree=None,
+    end_to_end_size=None,
+    end_to_end_seed=0,
+):
+    """Cases "n{size}-{pattern}", plus an optional small dense "e2e" graph."""
+    cases = tuple(
+        BenchmarkCase(
+            f"n{n}-{pattern}",
+            (n,),
+            pattern,
+            density=degree / n if degree else None,
+        )
+        for n in sizes
+        for pattern in patterns
+    )
+    if end_to_end_size is None:
+        return cases
+    return cases + (
         BenchmarkCase("e2e", (end_to_end_size,), "dense", seed=end_to_end_seed),
     )

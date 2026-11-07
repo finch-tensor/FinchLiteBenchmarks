@@ -1,10 +1,8 @@
-"""Cyclic three-table join: ``sum_ijk A[i,j] B[j,k] C[k,i]``."""
-
 import finch as fl
 import numpy as np
 
-from ..spec import BenchmarkCase, make_spec
-from .common import random_tensors
+from finchlitebench.benchmarks.autoschedule.queries.common import random_tensors
+from finchlitebench.benchmarks.autoschedule.spec import BenchmarkCase, make_spec
 
 
 def triangle_query(A, B, C):
@@ -28,7 +26,7 @@ def triangle_inputs(case):
 CASES = tuple(
     BenchmarkCase(f"{pattern}-{n}", (n, n), pattern)
     for pattern in ("skewed", "dense", "sparse")
-    for n in (16, 64)
+    for n in (80, 320)
 )
 
 SPEC = make_spec(
@@ -36,5 +34,5 @@ SPEC = make_spec(
     triangle_query,
     triangle_inputs,
     CASES,
-    end_to_end_cases=("skewed-16",),
+    end_to_end_cases=("skewed-80",),
 )

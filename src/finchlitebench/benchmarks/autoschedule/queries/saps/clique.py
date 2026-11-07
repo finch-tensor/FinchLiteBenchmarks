@@ -1,25 +1,25 @@
-"""SAPS Clique_6: the complete graph K4 on a, b, c, d (6 edges)."""
-
 import finch as fl
 
-from ...spec import make_spec
-from ..common import graph_cases, random_graph
+from finchlitebench.benchmarks.autoschedule.queries.common import (
+    graph_cases,
+    labelled_graph,
+)
+from finchlitebench.benchmarks.autoschedule.spec import make_spec
 
 
-def clique_6_query(G1, G2, G3, G4, G5, G6):
-    return fl.einsum("ab,ac,ad,bc,bd,cd->", G1, G2, G3, G4, G5, G6)
+def clique_6_query(E0, E1, V, P):
+    return fl.einsum("ab,ac,ad,bc,bd,cd,a,d->", E0, E1, E0, E1, E0, E1, V, P)
 
 
-def clique_6_inputs(case):
-    return random_graph(case, 6)
-
-
-CASES = graph_cases((16, 32), end_to_end_size=12)
+CASES = (
+    graph_cases((40,), ("dense",))
+    + graph_cases((1000,), ("sparse",), degree=10)
+)
 
 SPEC = make_spec(
     "saps_clique_6",
     clique_6_query,
-    clique_6_inputs,
+    labelled_graph,
     CASES,
-    end_to_end_cases=("e2e",),
+    end_to_end_cases=("n1000-sparse",),
 )

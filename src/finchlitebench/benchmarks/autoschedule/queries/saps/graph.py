@@ -1,25 +1,25 @@
-"""SAPS Graph_7: triangle a-b-c sharing edge b-c with square b-c-d-e, plus tail e-f."""
-
 import finch as fl
 
-from ...spec import make_spec
-from ..common import graph_cases, random_graph
+from finchlitebench.benchmarks.autoschedule.queries.common import (
+    graph_cases,
+    labelled_graph,
+)
+from finchlitebench.benchmarks.autoschedule.spec import make_spec
 
 
-def graph_7_query(G1, G2, G3, G4, G5, G6, G7):
-    return fl.einsum("ab,bc,ca,cd,de,eb,ef->", G1, G2, G3, G4, G5, G6, G7)
+def graph_7_query(E0, E1, V, P):
+    return fl.einsum("ab,bc,ca,cd,de,eb,ef,a,f->", E0, E1, E0, E1, E0, E1, E0, V, P)
 
 
-def graph_7_inputs(case):
-    return random_graph(case, 7)
-
-
-CASES = graph_cases((16, 32), end_to_end_size=6)
+CASES = (
+    graph_cases((40,), ("dense",))
+    + graph_cases((1000,), ("sparse",), degree=10)
+)
 
 SPEC = make_spec(
     "saps_graph_7",
     graph_7_query,
-    graph_7_inputs,
+    labelled_graph,
     CASES,
-    end_to_end_cases=("e2e",),
+    end_to_end_cases=("n1000-sparse",),
 )

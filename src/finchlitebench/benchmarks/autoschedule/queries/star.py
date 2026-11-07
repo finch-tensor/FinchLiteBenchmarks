@@ -1,9 +1,7 @@
-"""Star join: ``R[j,k,l] = sum_i A[i,j] B[i,k] C[i,l]``."""
-
 import finch as fl
 
-from ..spec import cases_from_shapes, make_spec
-from .common import random_tensors
+from finchlitebench.benchmarks.autoschedule.queries.common import random_tensors
+from finchlitebench.benchmarks.autoschedule.spec import cases_from_shapes, make_spec
 
 
 def star_query(A, B, C):
@@ -17,9 +15,9 @@ def star_inputs(case):
 
 CASES = cases_from_shapes(
     {
-        "balanced": (32, 32, 32, 32),
-        "narrow-center": (4, 64, 64, 64),
-        "wide-center": (128, 16, 16, 16),
+        "balanced": (160, 160, 160, 160),
+        "narrow-center": (20, 320, 320, 320),
+        "wide-center": (640, 80, 80, 80),
     }
 )
 

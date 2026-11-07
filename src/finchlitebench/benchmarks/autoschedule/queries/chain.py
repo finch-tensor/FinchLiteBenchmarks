@@ -1,13 +1,7 @@
-"""Chain join: ``R[i,l] = sum_jk A[i,j] B[j,k] C[k,l]``.
-
-Tests join association and loop order without a cycle.  The rectangular
-cases put the narrow dimension on opposite sides of B.
-"""
-
 import finch as fl
 
-from ..spec import cases_from_shapes, make_spec
-from .common import random_tensors
+from finchlitebench.benchmarks.autoschedule.queries.common import random_tensors
+from finchlitebench.benchmarks.autoschedule.spec import cases_from_shapes, make_spec
 
 
 def chain_query(A, B, C):
@@ -21,9 +15,9 @@ def chain_inputs(case):
 
 CASES = cases_from_shapes(
     {
-        "balanced": (32, 32, 32, 32),
-        "left-bottleneck": (64, 4, 128, 64),
-        "right-bottleneck": (64, 128, 4, 64),
+        "balanced": (160, 160, 160, 160),
+        "left-bottleneck": (320, 20, 640, 320),
+        "right-bottleneck": (320, 640, 20, 320),
     }
 )
 

@@ -1,7 +1,8 @@
-"""Minute-scale version of the triangle benchmark."""
-
-from ..queries.triangle import triangle_inputs, triangle_query
-from ..spec import BenchmarkCase, make_spec
+from finchlitebench.benchmarks.autoschedule.queries.triangle import (
+    triangle_inputs,
+    triangle_query,
+)
+from finchlitebench.benchmarks.autoschedule.spec import BenchmarkCase, make_spec
 
 
 CASES = (

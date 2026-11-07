@@ -1,9 +1,7 @@
-"""Tensor contraction: ``R[i,l] = sum_jk A[i,j,k] B[j,k,l]``."""
-
 import finch as fl
 
-from ..spec import cases_from_shapes, make_spec
-from .common import random_tensors
+from finchlitebench.benchmarks.autoschedule.queries.common import random_tensors
+from finchlitebench.benchmarks.autoschedule.spec import cases_from_shapes, make_spec
 
 
 def contraction_query(A, B):
@@ -17,9 +15,9 @@ def contraction_inputs(case):
 
 CASES = cases_from_shapes(
     {
-        "balanced": (24, 24, 24, 24),
-        "narrow-j": (64, 4, 128, 64),
-        "narrow-k": (64, 128, 4, 64),
+        "balanced": (120, 120, 120, 120),
+        "narrow-j": (320, 20, 640, 320),
+        "narrow-k": (320, 640, 20, 320),
     }
 )
 

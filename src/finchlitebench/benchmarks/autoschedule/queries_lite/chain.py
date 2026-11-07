@@ -1,7 +1,8 @@
-"""Minute-scale version of the chain benchmark."""
-
-from ..queries.chain import chain_inputs, chain_query
-from ..spec import BenchmarkCase, make_spec
+from finchlitebench.benchmarks.autoschedule.queries.chain import (
+    chain_inputs,
+    chain_query,
+)
+from finchlitebench.benchmarks.autoschedule.spec import BenchmarkCase, make_spec
 
 
 CASES = (

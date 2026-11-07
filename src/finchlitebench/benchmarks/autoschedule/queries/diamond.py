@@ -1,9 +1,7 @@
-"""Diamond join: ``R[i] = sum_jkl A[i,j] B[j,k] C[j,l] D[k,l]``."""
-
 import finch as fl
 
-from ..spec import cases_from_shapes, make_spec
-from .common import random_tensors
+from finchlitebench.benchmarks.autoschedule.queries.common import random_tensors
+from finchlitebench.benchmarks.autoschedule.spec import cases_from_shapes, make_spec
 
 
 def diamond_query(A, B, C, D):
@@ -17,9 +15,9 @@ def diamond_inputs(case):
 
 CASES = cases_from_shapes(
     {
-        "balanced": (24, 24, 24, 24),
-        "narrow-k": (32, 32, 4, 64),
-        "narrow-l": (32, 32, 64, 4),
+        "balanced": (120, 120, 120, 120),
+        "narrow-k": (160, 160, 20, 320),
+        "narrow-l": (160, 160, 320, 20),
     }
 )
 
