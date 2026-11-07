@@ -1,0 +1,152 @@
+"""Box-and-whisker plots of a subgraph-matching results CSV.
+
+    pixi run python -m finchtensorbench.benchmarks.plot_subgraph_matching \
+        graph/subgraph_matching/human_<stamp>.csv
+
+One panel per runtime (cached-plan execution, fresh plan + execution, first
+call); within a panel, one group per query family plus "All", one box per
+scheduler config.  Boxes span the quartiles, whiskers reach 1.5 IQR, and every
+query is drawn as a dot.  Only queries that finished with the correct count
+are plotted; the rest are counted in the panel's footnote.  Writes
+``<csv stem>_boxplot.png`` next to the CSV.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+from collections import Counter, defaultdict
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+from matplotlib.ticker import (  # noqa: E402
+    FuncFormatter,
+    LogLocator,
+    NullFormatter,
+)
+
+# Reference categorical palette (dataviz skill), fixed slot order.
+SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
+SURFACE, TEXT, TEXT_2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
+
+METRICS = (
+    ("exec_median_s", "Execution with a cached plan (median of runs)"),
+    ("plan_total_s", "Fresh plan + execution (stats, optimize, lower; warm Julia)"),
+    ("first_s", "First call (cold: includes Julia compilation of new kernels)"),
+)
+
+
+def load(path):
+    with open(path, newline="") as file:
+        return list(csv.DictReader(file))
+
+
+def _seconds(value, _pos=None):
+    for scale, unit in ((1, "s"), (1e-3, "ms"), (1e-6, "µs")):
+        if value >= scale:
+            return f"{value / scale:g} {unit}"
+    return f"{value:g} s"
+
+
+def _family_key(family):
+    shape, _, size = family.partition("_")
+    return (shape, int(size) if size.isdigit() else 0)
+
+
+def plot(path):
+    rows = load(path)
+    configs = list(dict.fromkeys(r["config"] for r in rows))
+    families = sorted({r["family"] for r in rows}, key=_family_key)
+    groups = [*families, "All"]
+    ok = defaultdict(list)  # (metric, config, group) -> values
+    failed = Counter()  # (config, status)
+    for r in rows:
+        if r["status"] != "ok":
+            failed[(r["config"], r["status"])] += 1
+            continue
+        for metric, _ in METRICS:
+            for group in (r["family"], "All"):
+                ok[(metric, r["config"], group)].append(float(r[metric]))
+
+    width = 0.8 / len(configs)
+    fig, axes = plt.subplots(
+        len(METRICS), 1, figsize=(max(7, 1.3 * len(groups) * len(configs) + 2), 11),
+        facecolor=SURFACE,
+    )  # fmt: skip
+    rng = np.random.default_rng(0)
+    for ax, (metric, title) in zip(axes, METRICS, strict=True):
+        ax.set_facecolor(SURFACE)
+        for c, config in enumerate(configs):
+            color = SERIES[c % len(SERIES)]
+            for g, group in enumerate(groups):
+                values = ok.get((metric, config, group), [])
+                if not values:
+                    continue
+                x = g + (c - (len(configs) - 1) / 2) * width
+                ax.boxplot(
+                    values, positions=[x], widths=width * 0.8, whis=1.5,
+                    showfliers=False, patch_artist=True,
+                    boxprops=dict(facecolor=color + "33", edgecolor=color, lw=1.2),
+                    medianprops=dict(color=color, lw=2),
+                    whiskerprops=dict(color=color, lw=1),
+                    capprops=dict(color=color, lw=1),
+                )  # fmt: skip
+                jitter = rng.uniform(-width * 0.25, width * 0.25, len(values))
+                ax.scatter(x + jitter, values, s=9, color=color, alpha=0.55,
+                           linewidths=0, zorder=3)  # fmt: skip
+        ax.set_yscale("log")
+        ax.yaxis.set_major_locator(LogLocator(subs=(1, 2, 5)))
+        ax.yaxis.set_major_formatter(FuncFormatter(_seconds))
+        ax.yaxis.set_minor_formatter(NullFormatter())
+        ax.set_xticks(range(len(groups)))
+        counts = Counter(r["family"] for r in rows if r["config"] == configs[0])
+        counts["All"] = sum(counts.values())
+        ax.set_xticklabels(
+            [f"{g}\nn={counts[g]}" for g in groups], fontsize=8, color=TEXT_2
+        )
+        ax.axvline(len(groups) - 1.5, color=GRID, lw=1)
+        ax.set_ylabel("time (log scale)", color=TEXT_2, fontsize=9)
+        ax.set_title(title, loc="left", fontsize=10, color=TEXT)
+        ax.grid(True, axis="y", which="major", color=GRID, lw=0.8)
+        ax.set_axisbelow(True)
+        ax.tick_params(colors=TEXT_2, labelsize=8)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        for side in ("left", "bottom"):
+            ax.spines[side].set_color(GRID)
+
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, facecolor=SERIES[i % len(SERIES)] + "33",
+                      edgecolor=SERIES[i % len(SERIES)])  # fmt: skip
+        for i in range(len(configs))
+    ]
+    fig.legend(handles, configs, loc="upper right", ncol=len(configs), frameon=False,
+               fontsize=9, labelcolor=TEXT)  # fmt: skip
+    dataset = rows[0]["dataset"] if rows else ""
+    fig.suptitle(f"Finch on G-CARE {dataset}: runtime per query",
+                 x=0.01, ha="left", fontsize=12, color=TEXT)  # fmt: skip
+    note = "; ".join(f"{c}: {n} {s}" for (c, s), n in sorted(failed.items()))
+    fig.text(0.01, 0.005,
+             "Correct results only. " + (f"Not plotted - {note}." if note else
+                                         "All queries finished correctly."),
+             fontsize=8, color=TEXT_2)  # fmt: skip
+    fig.tight_layout(rect=(0, 0.02, 1, 0.97))
+    out = Path(path).with_name(Path(path).stem + "_boxplot.png")
+    fig.savefig(out, dpi=150, facecolor=SURFACE)
+    print(f"wrote {out}")
+    return out
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("csv", type=Path)
+    args = parser.parse_args(argv)
+    plot(args.csv)
+
+
+if __name__ == "__main__":
+    main()
