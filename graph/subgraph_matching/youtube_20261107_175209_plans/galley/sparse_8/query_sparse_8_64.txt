@@ -1,0 +1,129 @@
+# youtube sparse_8/query_sparse_8_64
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ 3e658228bb (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += V7[v_0] * V24[v_1] * V6[v_2] * V8[v_3] * V16[v_4] * V14[v_5] * V7[v_6] * V16[v_7] * E0[v_0,v_1] * E0[v_1,v_4] * E0[v_1,v_5] * E0[v_2,v_3] * E0[v_2,v_4] * E0[v_2,v_5] * E0[v_2,v_7] * E0[v_3,v_4] * E0[v_3,v_5] * E0[v_3,v_6] * E0[v_4,v_5]
+einsum:       a,b,c,d,e,f,g,h,ab,be,bf,cd,ce,cf,ch,de,df,dg,ef->
+ground truth: 3389085
+vertices:     1134890
+operands:
+  E0     2-d  nnz 5975248
+  V14    1-d  nnz 45536
+  V16    1-d  nnz 45745
+  V24    1-d  nnz 45096
+  V6     1-d  nnz 45213
+  V7     1-d  nnz 45231
+  V8     1-d  nnz 45292
+
+==== after logic optimization (loop orderer input) ====
+#A#8709[#i#8351] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_160[#i#8351], MapJoin(mul, A_157[#i#8349], A_163[#i#8351, #i#8349])), #i#8349)
+#A#8710[#i#8350] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_159[#i#8350], MapJoin(mul, A_161[#i#8352], A_163[#i#8350, #i#8352])), #i#8352)
+#A#8711[#i#8354, #i#8348] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#8710[#i#8350], MapJoin(mul, #A#8709[#i#8351], MapJoin(mul, A_161[#i#8354], MapJoin(mul, A_162[#i#8348], MapJoin(mul, A_163[#i#8350, #i#8351], MapJoin(mul, A_163[#i#8350, #i#8354], MapJoin(mul, A_163[#i#8350, #i#8348], MapJoin(mul, A_163[#i#8351, #i#8354], MapJoin(mul, A_163[#i#8351, #i#8348], A_163[#i#8354, #i#8348]))))))))), #i#8350, #i#8351)
+#A#8712[#i#8353] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_158[#i#8353], MapJoin(mul, #A#8711[#i#8354, #i#8348], MapJoin(mul, A_163[#i#8353, #i#8354], A_163[#i#8353, #i#8348]))), #i#8348, #i#8354)
+#A#8713[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_157[#i#8355], MapJoin(mul, #A#8712[#i#8353], A_163[#i#8355, #i#8353])), #i#8353, #i#8355)
+A_78[] = #A#8713[]
+return A_78
+
+
+==== after loop ordering ====
+fuse(i_0):
+    fuse(i_1):
+        A_182[i_1, i_0] = A_163[i_0, i_1]
+fuse(#i#8349):
+    fuse(#i#8351):
+        #A#8709[#i#8351] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_160[#i#8351], A_157[#i#8349], A_182[#i#8349, #i#8351]), #i#8349)
+fuse(#i#8352):
+    fuse(#i#8350):
+        #A#8710[#i#8350] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_159[#i#8350], A_161[#i#8352], A_182[#i#8352, #i#8350]), #i#8352)
+fuse(#i#8348):
+    fuse(#i#8354):
+        fuse(#i#8350):
+            fuse(#i#8351):
+                #A#8711[#i#8354, #i#8348] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#8710[#i#8350], #A#8709[#i#8351], A_161[#i#8354], A_162[#i#8348], A_163[#i#8350, #i#8351], A_182[#i#8354, #i#8350], A_182[#i#8348, #i#8350], A_182[#i#8354, #i#8351], A_182[#i#8348, #i#8351], A_182[#i#8348, #i#8354]), #i#8350, #i#8351)
+fuse(#i#8353):
+    fuse(#i#8354):
+        fuse(#i#8348):
+            #A#8712[#i#8353] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_158[#i#8353], #A#8711[#i#8354, #i#8348], A_163[#i#8353, #i#8354], A_163[#i#8353, #i#8348]), #i#8348, #i#8354)
+fuse(#i#8355):
+    fuse(#i#8353):
+        #A#8713[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_157[#i#8355], #A#8712[#i#8353], A_163[#i#8355, #i#8353]), #i#8353, #i#8355)
+return #A#8713
+
+
+==== after workspacer (formatter input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_182[i_1, i_0] = A_163[i_0, i_1]
+fuse(#i#8349):
+    fuse(#i#8351):
+        #A#8709[#i#8351] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_160[#i#8351], A_157[#i#8349], A_182[#i#8349, #i#8351]), #i#8349)
+fuse(#i#8352):
+    fuse(#i#8350):
+        #A#8710[#i#8350] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_159[#i#8350], A_161[#i#8352], A_182[#i#8352, #i#8350]), #i#8352)
+fuse(#i#8348):
+    fuse(#i#8354):
+        fuse(#i#8350):
+            fuse(#i#8351):
+                #A#8711[#i#8354, #i#8348] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#8710[#i#8350], #A#8709[#i#8351], A_161[#i#8354], A_162[#i#8348], A_163[#i#8350, #i#8351], A_182[#i#8354, #i#8350], A_182[#i#8348, #i#8350], A_182[#i#8354, #i#8351], A_182[#i#8348, #i#8351], A_182[#i#8348, #i#8354]), #i#8350, #i#8351)
+fuse(#i#8353):
+    fuse(#i#8354):
+        fuse(#i#8348):
+            #A#8712[#i#8353] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_158[#i#8353], #A#8711[#i#8354, #i#8348], A_163[#i#8353, #i#8354], A_163[#i#8353, #i#8348]), #i#8348, #i#8354)
+fuse(#i#8355):
+    fuse(#i#8353):
+        #A#8713[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_157[#i#8355], #A#8712[#i#8353], A_163[#i#8355, #i#8353]), #i#8353, #i#8355)
+return #A#8713
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_182[i_1, i_0] = A_163[follow(i_0), walk(i_1)]
+fuse(#i#8349):
+    fuse(#i#8351):
+        #A#8709[#i#8351] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_160[gallop(#i#8351)], A_157[walk(#i#8349)], A_182[follow(#i#8349), walk(#i#8351)]), #i#8349)
+fuse(#i#8352):
+    fuse(#i#8350):
+        #A#8710[#i#8350] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_159[gallop(#i#8350)], A_161[walk(#i#8352)], A_182[follow(#i#8352), walk(#i#8350)]), #i#8352)
+fuse(#i#8348):
+    fuse(#i#8354):
+        fuse(#i#8350):
+            fuse(#i#8351):
+                #A#8711[#i#8354, #i#8348] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#8710[walk(#i#8350)], #A#8709[follow(#i#8351)], A_161[gallop(#i#8354)], A_162[walk(#i#8348)], A_163[follow(#i#8350), walk(#i#8351)], A_182[follow(#i#8354), walk(#i#8350)], A_182[follow(#i#8348), walk(#i#8350)], A_182[follow(#i#8354), walk(#i#8351)], A_182[follow(#i#8348), walk(#i#8351)], A_182[follow(#i#8348), walk(#i#8354)]), #i#8350, #i#8351)
+fuse(#i#8353):
+    fuse(#i#8354):
+        fuse(#i#8348):
+            #A#8712[#i#8353] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_158[walk(#i#8353)], #A#8711[follow(#i#8354), walk(#i#8348)], A_163[follow(#i#8353), walk(#i#8354)], A_163[follow(#i#8353), walk(#i#8348)]), #i#8348, #i#8354)
+fuse(#i#8355):
+    fuse(#i#8353):
+        #A#8713[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_157[walk(#i#8355)], #A#8712[gallop(#i#8353)], A_163[follow(#i#8355), walk(#i#8353)]), #i#8353, #i#8355)
+return #A#8713
+
+
+formats:
+  A_157            FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_158            FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_159            FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_160            FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_161            FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_162            FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_163            FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_182            FiberTensorFType(DenseLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#8709          FiberTensorFType(SparseHashLevelFType(ElementLevelFType(fv=0.0)))
+  #A#8710          FiberTensorFType(SparseHashLevelFType(ElementLevelFType(fv=0.0)))
+  #A#8711          FiberTensorFType(SparseHashLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#8712          FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  #A#8713          FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         3389085.0
+  first_s        17.028546348999953
+  plan_total_s   14.25432884399197
+  stats_s        0.39145537797594443
+  logic_s        0.16836044201045297
+  loop_s         0.708443787007127
+  workspace_s    0.0010112430027220398
+  lower_s        5.875014427991118
+  exec_median_s  4.121079264004948
+  exec_samples   4.09714;4.12108;4.19753

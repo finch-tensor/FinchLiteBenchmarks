@@ -1,0 +1,61 @@
+# aids Chain_3/uf_Q_1_4
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ cc30998981 (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += V11[v_0] * E0[v_0,v_1] * E3[v_1,v_2]
+einsum:       a,ab,bc->
+ground truth: 28
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  E3     2-d  nnz 227284
+  V11    1-d  nnz 10
+
+==== after logic optimization (loop orderer input) ====
+#A#61245[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#61227], MapJoin(mul, A_30[#i#61227, #i#61226], A_31[#i#61226, #i#61225])), #i#61225, #i#61226, #i#61227)
+A_14[] = #A#61245[]
+return A_14
+
+
+==== after loop ordering ====
+fuse(#i#61227):
+    fuse(#i#61226):
+        fuse(#i#61225):
+            #A#61245[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#61227], A_30[#i#61227, #i#61226], A_31[#i#61226, #i#61225]), #i#61225, #i#61226, #i#61227)
+return #A#61245
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#61227):
+    fuse(#i#61226):
+        fuse(#i#61225):
+            #A#61245[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#61227], A_30[#i#61227, #i#61226], A_31[#i#61226, #i#61225]), #i#61225, #i#61226, #i#61227)
+return #A#61245
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#61227):
+    fuse(#i#61226):
+        fuse(#i#61225):
+            #A#61245[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[walk(#i#61227)], A_30[follow(#i#61227), walk(#i#61226)], A_31[follow(#i#61226), walk(#i#61225)]), #i#61225, #i#61226, #i#61227)
+return #A#61245
+
+
+formats:
+  A_29             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_30             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_31             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#61245         FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         28.0
+  first_s        0.8327195349847898
+  plan_total_s   0.5498346129897982
+  stats_s        0.02958718000445515
+  logic_s        0.004575932020088658
+  loop_s         0.025628395000239834
+  workspace_s    0.00026139398687519133
+  lower_s        0.3761472399928607
+  exec_median_s  0.001521850994322449
+  exec_samples   0.00179858;0.00150767;0.00152185

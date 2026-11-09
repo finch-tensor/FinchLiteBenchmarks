@@ -1,0 +1,84 @@
+# aids Flower_6/uf_Q_2_5
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ c01d987cbf+dirty (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += V27[v_0] * E0[v_0,v_2] * E0[v_0,v_3] * E0[v_1,v_0] * E0[v_4,v_2] * E0[v_4,v_3]
+einsum:       a,ac,ad,ba,ec,ed->
+ground truth: 128
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  V27    1-d  nnz 7
+
+==== after logic optimization (loop orderer input) ====
+#A#38722[#i#38648, #i#38649] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#38648], MapJoin(mul, A_54[#i#38648, #i#38647], A_54[#i#38649, #i#38647])), #i#38647)
+#A#38723[#i#38648] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#38722[#i#38648, #i#38649], MapJoin(mul, A_54[#i#38648, #i#38646], A_54[#i#38649, #i#38646])), #i#38646, #i#38649)
+#A#38724[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#38723[#i#38648], A_54[#i#38645, #i#38648]), #i#38645, #i#38648)
+A_26[] = #A#38724[]
+return A_26
+
+
+==== after loop ordering ====
+fuse(#i#38648):
+    fuse(#i#38649):
+        fuse(#i#38647):
+            #A#38722[#i#38648, #i#38649] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#38648], A_54[#i#38648, #i#38647], A_54[#i#38649, #i#38647]), #i#38647)
+fuse(#i#38648):
+    fuse(#i#38649):
+        fuse(#i#38646):
+            #A#38723[#i#38648] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#38722[#i#38648, #i#38649], A_54[#i#38648, #i#38646], A_54[#i#38649, #i#38646]), #i#38646, #i#38649)
+fuse(#i#38645):
+    fuse(#i#38648):
+        #A#38724[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#38723[#i#38648], A_54[#i#38645, #i#38648]), #i#38645, #i#38648)
+return #A#38724
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#38648):
+    fuse(#i#38649):
+        fuse(#i#38647):
+            #A#38722[#i#38648, #i#38649] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#38648], A_54[#i#38648, #i#38647], A_54[#i#38649, #i#38647]), #i#38647)
+fuse(#i#38648):
+    fuse(#i#38649):
+        fuse(#i#38646):
+            #A#38723[#i#38648] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#38722[#i#38648, #i#38649], A_54[#i#38648, #i#38646], A_54[#i#38649, #i#38646]), #i#38646, #i#38649)
+fuse(#i#38645):
+    fuse(#i#38648):
+        #A#38724[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#38723[#i#38648], A_54[#i#38645, #i#38648]), #i#38645, #i#38648)
+return #A#38724
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#38648):
+    fuse(#i#38649):
+        fuse(#i#38647):
+            #A#38722[#i#38648, #i#38649] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[walk(#i#38648)], A_54[follow(#i#38648), gallop(#i#38647)], A_54[follow(#i#38649), gallop(#i#38647)]), #i#38647)
+fuse(#i#38648):
+    fuse(#i#38649):
+        fuse(#i#38646):
+            #A#38723[#i#38648] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#38722[walk(#i#38648), walk(#i#38649)], A_54[follow(#i#38648), walk(#i#38646)], A_54[follow(#i#38649), walk(#i#38646)]), #i#38646, #i#38649)
+fuse(#i#38645):
+    fuse(#i#38648):
+        #A#38724[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#38723[gallop(#i#38648)], A_54[follow(#i#38645), gallop(#i#38648)]), #i#38645, #i#38648)
+return #A#38724
+
+
+formats:
+  A_53             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_54             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#38722         FiberTensorFType(SparseListLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#38723         FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  #A#38724         FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         128.0
+  first_s        2.041119228990283
+  plan_total_s   1.8011105409823358
+  stats_s        0.018298290960956365
+  logic_s        0.01965117105282843
+  loop_s         0.07091931696049869
+  workspace_s    0.0005121930153109133
+  lower_s        1.0868146360153332
+  exec_median_s  0.019459981995169073
+  exec_samples   0.01946;0.0194503;0.0198742

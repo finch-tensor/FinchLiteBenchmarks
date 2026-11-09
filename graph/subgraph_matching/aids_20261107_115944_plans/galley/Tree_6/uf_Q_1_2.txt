@@ -1,0 +1,83 @@
+# aids Tree_6/uf_Q_1_2
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ cc30998981 (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += V9[v_0] * V51[v_2] * E0[v_1,v_0] * E0[v_2,v_0] * E0[v_3,v_0] * E0[v_3,v_4]
+einsum:       a,c,ba,ca,da,de->
+ground truth: 12
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  V51    1-d  nnz 1
+  V9     1-d  nnz 475
+
+==== after logic optimization (loop orderer input) ====
+#A#226626[#i#226559] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#226559], MapJoin(mul, A_54[#i#226560], A_55[#i#226560, #i#226559])), #i#226560)
+#A#226627[#i#226559] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#226626[#i#226559], MapJoin(mul, A_55[#i#226563, #i#226559], A_55[#i#226563, #i#226562])), #i#226562, #i#226563)
+#A#226628[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#226627[#i#226559], A_55[#i#226561, #i#226559]), #i#226559, #i#226561)
+A_26[] = #A#226628[]
+return A_26
+
+
+==== after loop ordering ====
+fuse(#i#226560):
+    fuse(#i#226559):
+        #A#226626[#i#226559] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#226559], A_54[#i#226560], A_55[#i#226560, #i#226559]), #i#226560)
+fuse(#i#226563):
+    fuse(#i#226559):
+        fuse(#i#226562):
+            #A#226627[#i#226559] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#226626[#i#226559], A_55[#i#226563, #i#226559], A_55[#i#226563, #i#226562]), #i#226562, #i#226563)
+fuse(#i#226561):
+    fuse(#i#226559):
+        #A#226628[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#226627[#i#226559], A_55[#i#226561, #i#226559]), #i#226559, #i#226561)
+return #A#226628
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#226560):
+    fuse(#i#226559):
+        #A#226626[#i#226559] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#226559], A_54[#i#226560], A_55[#i#226560, #i#226559]), #i#226560)
+fuse(#i#226563):
+    fuse(#i#226559):
+        fuse(#i#226562):
+            #A#226627[#i#226559] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#226626[#i#226559], A_55[#i#226563, #i#226559], A_55[#i#226563, #i#226562]), #i#226562, #i#226563)
+fuse(#i#226561):
+    fuse(#i#226559):
+        #A#226628[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#226627[#i#226559], A_55[#i#226561, #i#226559]), #i#226559, #i#226561)
+return #A#226628
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#226560):
+    fuse(#i#226559):
+        #A#226626[#i#226559] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[gallop(#i#226559)], A_54[gallop(#i#226560)], A_55[follow(#i#226560), walk(#i#226559)]), #i#226560)
+fuse(#i#226563):
+    fuse(#i#226559):
+        fuse(#i#226562):
+            #A#226627[#i#226559] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#226626[walk(#i#226559)], A_55[follow(#i#226563), gallop(#i#226559)], A_55[follow(#i#226563), walk(#i#226562)]), #i#226562, #i#226563)
+fuse(#i#226561):
+    fuse(#i#226559):
+        #A#226628[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#226627[walk(#i#226559)], A_55[follow(#i#226561), gallop(#i#226559)]), #i#226559, #i#226561)
+return #A#226628
+
+
+formats:
+  A_53             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_54             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_55             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#226626        FiberTensorFType(SparseHashLevelFType(ElementLevelFType(fv=0.0)))
+  #A#226627        FiberTensorFType(SparseHashLevelFType(ElementLevelFType(fv=0.0)))
+  #A#226628        FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         12.0
+  first_s        2.8716338780068327
+  plan_total_s   2.3166166840237565
+  stats_s        0.020863229961832985
+  logic_s        0.015881626051850617
+  loop_s         0.06292673197458498
+  workspace_s    0.0005442890105769038
+  lower_s        1.3345004509901628
+  exec_median_s  0.007202273001894355
+  exec_samples   0.0075535;0.00720227;0.00705926

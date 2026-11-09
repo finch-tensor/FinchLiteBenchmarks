@@ -1,14 +1,15 @@
-"""Box-and-whisker plots of a subgraph-matching results CSV.
+"""Box-and-whisker plots of subgraph-matching results CSVs.
 
     pixi run python -m finchtensorbench.benchmarks.plot_subgraph_matching \
-        graph/subgraph_matching/human_<stamp>.csv
+        graph/subgraph_matching/human_<stamp>.csv [more CSVs ...] [--out PNG]
 
 One panel per runtime (cached-plan execution, fresh plan + execution, first
 call); within a panel, one group per query family plus "All", one box per
 scheduler config.  Boxes span the quartiles, whiskers reach 1.5 IQR, and every
 query is drawn as a dot.  Only queries that finished with the correct count
-are plotted; the rest are counted in the panel's footnote.  Writes
-``<csv stem>_boxplot.png`` next to the CSV.
+are plotted; the rest are counted in the panel's footnote.  Several CSVs (e.g.
+finch and Galley.jl on one dataset) are drawn together.  Writes
+``<first csv stem>_boxplot.png`` next to the first CSV unless ``--out`` is given.
 """
 
 from __future__ import annotations
@@ -52,29 +53,40 @@ def _seconds(value, _pos=None):
     return f"{value:g} s"
 
 
+MAX_FAMILY_GROUPS = 8
+MAX_WIDTH_IN = 18
+
+
 def _family_key(family):
     shape, _, size = family.partition("_")
     return (shape, int(size) if size.isdigit() else 0)
 
 
-def plot(path):
-    rows = load(path)
+def plot(paths, out=None):
+    rows = [row for path in paths for row in load(path)]
     configs = list(dict.fromkeys(r["config"] for r in rows))
     families = sorted({r["family"] for r in rows}, key=_family_key)
-    groups = [*families, "All"]
+    # Many families (e.g. AIDS: Chain_3 ... Tree_12) are grouped by shape.
+    by_shape = len(families) > MAX_FAMILY_GROUPS
+
+    def group_of(row):
+        return row["family"].split("_")[0] if by_shape else row["family"]
+
+    groups = [*dict.fromkeys(group_of({"family": f}) for f in families), "All"]
     ok = defaultdict(list)  # (metric, config, group) -> values
     failed = Counter()  # (config, status)
     for r in rows:
-        if r["status"] != "ok":
+        if r["status"] not in ("ok", "unchecked"):
             failed[(r["config"], r["status"])] += 1
             continue
         for metric, _ in METRICS:
-            for group in (r["family"], "All"):
+            for group in (group_of(r), "All"):
                 ok[(metric, r["config"], group)].append(float(r[metric]))
 
     width = 0.8 / len(configs)
     fig, axes = plt.subplots(
-        len(METRICS), 1, figsize=(max(7, 1.3 * len(groups) * len(configs) + 2), 11),
+        len(METRICS), 1,
+        figsize=(min(MAX_WIDTH_IN, max(7, 1.0 * len(groups) * len(configs) + 2)), 11),
         facecolor=SURFACE,
     )  # fmt: skip
     rng = np.random.default_rng(0)
@@ -103,7 +115,7 @@ def plot(path):
         ax.yaxis.set_major_formatter(FuncFormatter(_seconds))
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.set_xticks(range(len(groups)))
-        counts = Counter(r["family"] for r in rows if r["config"] == configs[0])
+        counts = Counter(group_of(r) for r in rows if r["config"] == configs[0])
         counts["All"] = sum(counts.values())
         ax.set_xticklabels(
             [f"{g}\nn={counts[g]}" for g in groups], fontsize=8, color=TEXT_2
@@ -127,7 +139,7 @@ def plot(path):
     fig.legend(handles, configs, loc="upper right", ncol=len(configs), frameon=False,
                fontsize=9, labelcolor=TEXT)  # fmt: skip
     dataset = rows[0]["dataset"] if rows else ""
-    fig.suptitle(f"Finch on G-CARE {dataset}: runtime per query",
+    fig.suptitle(f"{' vs '.join(configs)} on {dataset}: runtime per query",
                  x=0.01, ha="left", fontsize=12, color=TEXT)  # fmt: skip
     note = "; ".join(f"{c}: {n} {s}" for (c, s), n in sorted(failed.items()))
     fig.text(0.01, 0.005,
@@ -135,7 +147,8 @@ def plot(path):
                                          "All queries finished correctly."),
              fontsize=8, color=TEXT_2)  # fmt: skip
     fig.tight_layout(rect=(0, 0.02, 1, 0.97))
-    out = Path(path).with_name(Path(path).stem + "_boxplot.png")
+    if out is None:
+        out = Path(paths[0]).with_name(Path(paths[0]).stem + "_boxplot.png")
     fig.savefig(out, dpi=150, facecolor=SURFACE)
     print(f"wrote {out}")
     return out
@@ -143,9 +156,10 @@ def plot(path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("csv", type=Path)
+    parser.add_argument("csv", type=Path, nargs="+")
+    parser.add_argument("--out", type=Path)
     args = parser.parse_args(argv)
-    plot(args.csv)
+    plot(args.csv, args.out)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,42 @@
+# aids Flower_6/uf_Q_0_2
+# config: galley-sampling (galley-bfs/bfs/galley/sampling/ws)
+# finch-tensor 0.7.0 kbd/workspace-loop-orderer @ f302f121db
+
+query:        S[] += V7[v_0] * E0[v_1,v_0] * E1[v_2,v_3] * E0[v_2,v_4] * E0[v_3,v_0] * E0[v_4,v_0]
+einsum:       a,ba,cd,ce,da,ea->
+ground truth: 8
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  E1     2-d  nnz 48010
+  V7     1-d  nnz 7
+
+==== after logic optimization (loop orderer input) ====
+#A#2464[#i#1790, #i#1787] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#1790], MapJoin(mul, A_54[#i#1787, #i#1791], A_54[#i#1791, #i#1790])), #i#1791)
+#A#2465[#i#1790] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#2464[#i#1790, #i#1787], MapJoin(mul, A_55[#i#1787, #i#1788], A_54[#i#1788, #i#1790])), #i#1787, #i#1788)
+#A#2466[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#2465[#i#1790], A_54[#i#1789, #i#1790]), #i#1789, #i#1790)
+A_26[] = #A#2466[]
+return A_26
+
+
+==== measured ====
+  status         oom
+  error          JuliaError: OutOfMemoryError()
+Stacktrace:
+  [1] GenericMemory
+    @ ./boot.jl:588 [inlined]
+  [2] array_new_memory
+    @ ./array.jl:1067 [inlined]
+  [3] (::Base.var"#_growend!##0#_growend!##1"{Vector{Int64}, Int64, Int64, Int64, Int64, Int64, Memory{Int64}, MemoryRef{Int64}})()
+    @ Base ./array.jl:1148
+  [4] _growend!
+    @ ./array.jl:1131 [inlined]
+  [5] resize!(a::Vector{Int64}, nl_::Int64)
+    @ Base ./array.jl:1479
+  [6] resize!
+    @ ~/FinchLiteBenchmarks/.pixi/envs/default/lib/python3.13/site-packages/finch/compile_jl/buffers.jl:88 [inlined]
+  [7] resize!
+    @ ~/.julia/packages/Finch/BEDOJ/src/util/vectors.jl:60 [inlined]
+  [8] sparse_hash_resize!(tbl_ctrl::Main.FinchInterop.Buffer{UInt8}, tbl::PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, key::PlusOneVector{Tuple{Int64, Int64, UInt8}, Main.FinchInterop.Buffer{Tuple{Int64, Int64, UInt8}}, (1, 2)}, cap::Int64, subtables::Int64, pos_multiplier::UInt64, qos_stop::Int64)
+    @ Finch ~/.julia/packages/Finch/BEDOJ/src/tensors/levels/sparse_hash_levels.jl:234
+  [9] kernel_1b32fdf9dab1458eb9daec3406fc3dca(v0::Tensor{SparseHashLevel{Int64, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{UInt8}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, PlusOneVector{Tuple{Int64, Int64, UInt8}, Main.FinchInterop.Buffer{Tuple{Int64, Int64, UInt8}}, (1, 2)}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{Int64}, SparseHashLevel{Int64, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{UInt8}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, PlusOneVector{Tuple{Int64, Int64, UInt8}, Main.FinchInterop.Buffer{Tuple{Int64, Int64, UInt8}}, (1, 2)}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{Int64}, ElementLevel{0, Int64, Int64, Main.FinchInterop.Buffer{Int64}}}}}, v1::Tensor{SparseHashLevel{Int64, PlusOneVector{Int64, Mai

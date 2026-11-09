@@ -1,0 +1,145 @@
+# aids Flower_9/uf_Q_4_2
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor 0.7.0 kbd/workspace-loop-orderer @ f302f121db
+
+query:        S[] += V6[v_1] * E0[v_0,v_1] * E0[v_0,v_2] * E0[v_3,v_0] * E1[v_4,v_3] * E0[v_5,v_6] * E0[v_5,v_7] * E0[v_6,v_0] * E0[v_7,v_0]
+einsum:       b,ab,ac,da,ed,fg,fh,ga,ha->
+ground truth: 35158
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  E1     2-d  nnz 48010
+  V6     1-d  nnz 2491
+
+==== after logic optimization (loop orderer input) ====
+#A#1085[#i#385, #i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_78[#i#385, #i#388], A_78[#i#388, #i#383]), #i#388)
+#A#1086[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_77[#i#386], A_78[#i#383, #i#386]), #i#386)
+#A#1087[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1086[#i#383], MapJoin(mul, A_78[#i#385, #i#387], MapJoin(mul, #A#1085[#i#385, #i#383], A_78[#i#387, #i#383]))), #i#385, #i#387)
+#A#1088[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1087[#i#383], MapJoin(mul, A_78[#i#384, #i#383], A_79[#i#381, #i#384])), #i#381, #i#384)
+#A#1089[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1088[#i#383], A_78[#i#383, #i#382]), #i#382, #i#383)
+A_38[] = #A#1089[]
+return A_38
+
+
+==== after loop ordering ====
+fuse(i_0):
+    fuse(i_1):
+        A_89[i_1, i_0] = A_78[i_0, i_1]
+fuse(#i#385):
+    fuse(#i#388):
+        fuse(#i#383):
+            #A#1085[#i#385, #i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_78[#i#385, #i#388], A_78[#i#388, #i#383]), #i#388)
+fuse(i_0):
+    fuse(i_1):
+        #A#1085_3[i_1, i_0] = #A#1085[i_0, i_1]
+fuse(#i#383):
+    fuse(#i#386):
+        #A#1086[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_77[#i#386], A_78[#i#383, #i#386]), #i#386)
+fuse(#i#383):
+    fuse(#i#385):
+        fuse(#i#387):
+            #A#1087[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1086[#i#383], A_78[#i#385, #i#387], #A#1085_3[#i#383, #i#385], A_89[#i#383, #i#387]), #i#385, #i#387)
+fuse(#i#381):
+    fuse(#i#384):
+        fuse(#i#383):
+            #A#1088[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1087[#i#383], A_78[#i#384, #i#383], A_79[#i#381, #i#384]), #i#381, #i#384)
+fuse(#i#383):
+    fuse(#i#382):
+        #A#1089[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1088[#i#383], A_78[#i#383, #i#382]), #i#382, #i#383)
+return #A#1089
+
+
+==== after workspacer (formatter input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_89[i_1, i_0] = A_78[i_0, i_1]
+fuse(#i#385):
+    fuse(#i#388):
+        fuse(#i#383):
+            #A#1085_ws(#i#385)[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_78[#i#385, #i#388], A_78[#i#388, #i#383]), #i#388)
+    fuse(#i#383):
+        #A#1085[#i#385, #i#383] = #A#1085_ws(#i#385)[#i#383]
+fuse(i_0):
+    fuse(i_1):
+        #A#1085_3[i_1, i_0] = #A#1085[i_0, i_1]
+fuse(#i#383):
+    fuse(#i#386):
+        #A#1086[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_77[#i#386], A_78[#i#383, #i#386]), #i#386)
+fuse(#i#383):
+    fuse(#i#385):
+        fuse(#i#387):
+            #A#1087[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1086[#i#383], A_78[#i#385, #i#387], #A#1085_3[#i#383, #i#385], A_89[#i#383, #i#387]), #i#385, #i#387)
+fuse(#i#381):
+    fuse(#i#384):
+        fuse(#i#383):
+            #A#1088[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1087[#i#383], A_78[#i#384, #i#383], A_79[#i#381, #i#384]), #i#381, #i#384)
+fuse(#i#383):
+    fuse(#i#382):
+        #A#1089[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1088[#i#383], A_78[#i#383, #i#382]), #i#382, #i#383)
+return #A#1089
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_89[i_1, i_0] = A_78[follow(i_0), gallop(i_1)]
+fuse(#i#385):
+    fuse(#i#388):
+        fuse(#i#383):
+            #A#1085_ws(#i#385)[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_78[follow(#i#385), gallop(#i#388)], A_78[follow(#i#388), walk(#i#383)]), #i#388)
+    fuse(#i#383):
+        #A#1085[#i#385, #i#383] = #A#1085_ws(#i#385)[follow(#i#383)]
+fuse(i_0):
+    fuse(i_1):
+        #A#1085_3[i_1, i_0] = #A#1085[follow(i_0), walk(i_1)]
+fuse(#i#383):
+    fuse(#i#386):
+        #A#1086[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_77[gallop(#i#386)], A_78[follow(#i#383), gallop(#i#386)]), #i#386)
+fuse(#i#383):
+    fuse(#i#385):
+        fuse(#i#387):
+            #A#1087[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1086[walk(#i#383)], A_78[follow(#i#385), walk(#i#387)], #A#1085_3[follow(#i#383), walk(#i#385)], A_89[follow(#i#383), walk(#i#387)]), #i#385, #i#387)
+fuse(#i#381):
+    fuse(#i#384):
+        fuse(#i#383):
+            #A#1088[#i#383] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1087[follow(#i#383)], A_78[follow(#i#384), walk(#i#383)], A_79[follow(#i#381), gallop(#i#384)]), #i#381, #i#384)
+fuse(#i#383):
+    fuse(#i#382):
+        #A#1089[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#1088[walk(#i#383)], A_78[follow(#i#383), walk(#i#382)]), #i#382, #i#383)
+return #A#1089
+
+
+formats:
+  A_77             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_78             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_79             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_89             FiberTensorFType(DenseLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#1085_ws       FiberTensorFType(DenseLevelFType(ElementLevelFType(fv=0.0)))
+  #A#1085          FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#1085_3        FiberTensorFType(DenseLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#1086          FiberTensorFType(SparseByteMapLevelFType(ElementLevelFType(fv=0.0)))
+  #A#1087          FiberTensorFType(SparseByteMapLevelFType(ElementLevelFType(fv=0.0)))
+  #A#1088          FiberTensorFType(SparseByteMapLevelFType(ElementLevelFType(fv=0.0)))
+  #A#1089          FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         oom
+  error          JuliaError: OutOfMemoryError()
+Stacktrace:
+  [1] GenericMemory
+    @ ./boot.jl:588 [inlined]
+  [2] array_new_memory
+    @ ./array.jl:1067 [inlined]
+  [3] (::Base.var"#_growend!##0#_growend!##1"{Vector{Int64}, Int64, Int64, Int64, Int64, Int64, Memory{Int64}, MemoryRef{Int64}})()
+    @ Base ./array.jl:1148
+  [4] _growend!
+    @ ./array.jl:1131 [inlined]
+  [5] resize!(a::Vector{Int64}, nl_::Int64)
+    @ Base ./array.jl:1479
+  [6] resize!
+    @ ~/FinchLiteBenchmarks/.pixi/envs/default/lib/python3.13/site-packages/finch/compile_jl/buffers.jl:88 [inlined]
+  [7] resize!
+    @ ~/.julia/packages/Finch/BEDOJ/src/util/vectors.jl:60 [inlined]
+  [8] resize_if_smaller!
+    @ ~/.julia/packages/Finch/BEDOJ/src/util/shims.jl:8 [inlined]
+  [9] kernel_a655f90c155b4c379aa1696b0d903933(v0::Tensor{SparseListLevel{Int64, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, ElementLevel{0.0, Float64, Int64, Main.FinchInterop.Buffer{Float64}}}}, v1::Tensor{DenseLevel{Int64, SparseListLevel{Int64, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, ElementLevel{0.0, Float64, Int64, Main.FinchInterop.Buffer{Float64}}}}}, v2::Tensor{DenseLevel{Int64, SparseListLevel{Int64, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, ElementLevel{0.0, Float64, Int64, Main.FinchInterop.Buffer{Float64}}}}}, v3::Tensor{DenseLevel{Int64, SparseHashLevel{Int64, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{UInt8}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, PlusOneVector{Tuple{Int64, Int64, UInt8}, Main.FinchInterop.Buffer{Tuple{Int64, Int64, UInt8}}, (1, 2)}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{Int64}, ElementLevel{0.0, Float64, Int64, Main.FinchInterop.Buffer{Float64}}

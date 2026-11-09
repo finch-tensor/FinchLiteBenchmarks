@@ -1,0 +1,45 @@
+# aids Chain_12/uf_Q_5_1
+# config: galley-sampling (galley-bfs/bfs/galley/sampling/ws)
+# finch-tensor 0.7.0 kbd/workspace-loop-orderer @ f302f121db
+
+query:        S[] += E0[v_1,v_0] * E0[v_2,v_1] * E0[v_2,v_3] * E0[v_3,v_4] * E0[v_5,v_4] * E0[v_5,v_6] * E1[v_7,v_6] * E0[v_7,v_8] * E0[v_8,v_9] * E1[v_9,v_10] * E0[v_11,v_10] * E3[v_11,v_12]
+einsum:       ba,cb,cd,de,fe,fg,hg,hi,ij,jk,lk,lm->
+ground truth: 146318
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  E1     2-d  nnz 48010
+  E3     2-d  nnz 227284
+
+==== after logic optimization (loop orderer input) ====
+#A#3245[#i#2003, #i#2001] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_101[#i#2003, #i#2000], A_102[#i#2000, #i#2001]), #i#2000)
+#A#3246[#i#2003, #i#1998] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#3245[#i#2003, #i#2001], A_101[#i#1998, #i#2001]), #i#2001)
+#A#3247[#i#2003] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#3246[#i#2003, #i#1998], A_103[#i#1998, #i#2004]), #i#1998, #i#2004)
+#A#3248[#i#2008] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_102[#i#1997, #i#2008], MapJoin(mul, A_101[#i#1997, #i#2003], #A#3247[#i#2003])), #i#1997, #i#2003)
+#A#3249[#i#2005] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_101[#i#1996, #i#2005], MapJoin(mul, A_101[#i#1996, #i#2008], #A#3248[#i#2008])), #i#1996, #i#2008)
+#A#3250[#i#1999] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_101[#i#1999, #i#2002], MapJoin(mul, A_101[#i#2002, #i#2005], #A#3249[#i#2005])), #i#2002, #i#2005)
+#A#3251[#i#2006] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_101[#i#1999, #i#2006], #A#3250[#i#1999]), #i#1999)
+#A#3252[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_101[#i#2006, #i#2007], #A#3251[#i#2006]), #i#2006, #i#2007)
+A_50[] = #A#3252[]
+return A_50
+
+
+==== measured ====
+  status         oom
+  error          JuliaError: OutOfMemoryError()
+Stacktrace:
+  [1] GenericMemory
+    @ ./boot.jl:588 [inlined]
+  [2] array_new_memory
+    @ ./array.jl:1067 [inlined]
+  [3] (::Base.var"#_growend!##0#_growend!##1"{Vector{Tuple{Int64, Int64, UInt8}}, Int64, Int64, Int64, Int64, Int64, Memory{Tuple{Int64, Int64, UInt8}}, MemoryRef{Tuple{Int64, Int64, UInt8}}})()
+    @ Base ./array.jl:1148
+  [4] _growend!
+    @ ./array.jl:1131 [inlined]
+  [5] resize!(a::Vector{Tuple{Int64, Int64, UInt8}}, nl_::Int64)
+    @ Base ./array.jl:1479
+  [6] resize!
+    @ ~/FinchLiteBenchmarks/.pixi/envs/default/lib/python3.13/site-packages/finch/compile_jl/buffers.jl:88 [inlined]
+  [7] resize!
+    @ ~/.julia/packages/Finch/BEDOJ/src/util/vectors.jl:60 [inlined]
+  [8] kernel_b02ff853e7cf4b189ad4a4d8504ce62f(v0::Tensor{SparseHashLevel{Int64, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{UInt8}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, PlusOneVector{Tuple{Int64, Int64, UInt8}, Main.FinchInterop.Buffer{Tuple{Int64, Int64, UInt8}}, (1, 2)}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{Int64}, SparseHashLevel{Int64, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{UInt8}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, PlusOneVector{Tuple{Int64, Int64, UInt8}, Main.FinchInterop.Buffer{Tuple{Int64, Int64, UInt8}}, (1, 2)}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{Int64}, ElementLevel{0, Int64, Int64, Main.FinchInterop.Buffer{Int64}}}}}, v1::Tensor{SparseHashLevel{Int64, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchInterop.Buffer{UInt8}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, PlusOneVector{Tuple{Int64, Int64, UInt8}, Main.FinchInterop.Buffer{Tuple{Int64, Int64, UInt8}}, (1, 2)}, PlusOneVector{Int64, Main.FinchInterop.Buffer{Int64}, nothing}, Main.FinchIntero

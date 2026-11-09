@@ -1,0 +1,67 @@
+# aids Cycle_3/uf_Q_3_14
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor 0.7.0 kbd/workspace-loop-orderer @ f302f121db
+
+query:        S[] += E0[v_0,v_1] * E0[v_2,v_0] * E0[v_2,v_1]
+einsum:       ab,ca,cb->
+ground truth: 3240
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+
+==== after logic optimization (loop orderer input) ====
+#A#20216[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#20197, #i#20196], MapJoin(mul, A_29[#i#20198, #i#20197], A_29[#i#20198, #i#20196])), #i#20196, #i#20197, #i#20198)
+A_14[] = #A#20216[]
+return A_14
+
+
+==== after loop ordering ====
+fuse(i_0):
+    fuse(i_1):
+        A_34[i_1, i_0] = A_29[i_0, i_1]
+fuse(#i#20198):
+    fuse(#i#20196):
+        fuse(#i#20197):
+            #A#20216[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_34[#i#20196, #i#20197], A_29[#i#20198, #i#20197], A_29[#i#20198, #i#20196]), #i#20196, #i#20197, #i#20198)
+return #A#20216
+
+
+==== after workspacer (formatter input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_34[i_1, i_0] = A_29[i_0, i_1]
+fuse(#i#20198):
+    fuse(#i#20196):
+        fuse(#i#20197):
+            #A#20216[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_34[#i#20196, #i#20197], A_29[#i#20198, #i#20197], A_29[#i#20198, #i#20196]), #i#20196, #i#20197, #i#20198)
+return #A#20216
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_34[i_1, i_0] = A_29[follow(i_0), gallop(i_1)]
+fuse(#i#20198):
+    fuse(#i#20196):
+        fuse(#i#20197):
+            #A#20216[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_34[follow(#i#20196), walk(#i#20197)], A_29[follow(#i#20198), walk(#i#20197)], A_29[follow(#i#20198), gallop(#i#20196)]), #i#20196, #i#20197, #i#20198)
+return #A#20216
+
+
+formats:
+  A_29             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_34             FiberTensorFType(DenseLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#20216         FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         3240.0
+  first_s        1.4058173410012387
+  plan_total_s   1.1188502389995847
+  stats_s        0.017449307983042672
+  logic_s        0.004478022019611672
+  loop_s         0.0333197379950434
+  workspace_s    0.00029557698871940374
+  lower_s        0.6329949460050557
+  exec_median_s  0.02093116700416431
+  exec_samples   0.0226134;0.0209312;0.0205613

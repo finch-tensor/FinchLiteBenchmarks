@@ -1,0 +1,57 @@
+# aids Graph_3/uf_Q_3_9
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ cc30998981 (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += E0[v_0,v_1] * E0[v_0,v_2] * E0[v_1,v_2]
+einsum:       ab,ac,bc->
+ground truth: 3240
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+
+==== after logic optimization (loop orderer input) ====
+#A#9537[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#9519, #i#9518], MapJoin(mul, A_29[#i#9519, #i#9517], A_29[#i#9518, #i#9517])), #i#9517, #i#9518, #i#9519)
+A_14[] = #A#9537[]
+return A_14
+
+
+==== after loop ordering ====
+fuse(#i#9519):
+    fuse(#i#9518):
+        fuse(#i#9517):
+            #A#9537[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#9519, #i#9518], A_29[#i#9519, #i#9517], A_29[#i#9518, #i#9517]), #i#9517, #i#9518, #i#9519)
+return #A#9537
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#9519):
+    fuse(#i#9518):
+        fuse(#i#9517):
+            #A#9537[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#9519, #i#9518], A_29[#i#9519, #i#9517], A_29[#i#9518, #i#9517]), #i#9517, #i#9518, #i#9519)
+return #A#9537
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#9519):
+    fuse(#i#9518):
+        fuse(#i#9517):
+            #A#9537[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[follow(#i#9519), gallop(#i#9518)], A_29[follow(#i#9519), walk(#i#9517)], A_29[follow(#i#9518), walk(#i#9517)]), #i#9517, #i#9518, #i#9519)
+return #A#9537
+
+
+formats:
+  A_29             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#9537          FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         3240.0
+  first_s        0.4821289849933237
+  plan_total_s   0.5321001959964633
+  stats_s        0.015662281977711245
+  logic_s        0.004076461016666144
+  loop_s         0.03643728498718701
+  workspace_s    0.00021812799968756735
+  lower_s        0.3625932580034714
+  exec_median_s  0.005750823998823762
+  exec_samples   0.0058217;0.00575082;0.00571006

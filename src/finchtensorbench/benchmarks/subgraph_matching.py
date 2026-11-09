@@ -32,6 +32,7 @@ import json
 import math
 import os
 import queue
+import random
 import resource
 import statistics
 import subprocess
@@ -178,8 +179,30 @@ def plan_path(plan_dir: Path, config_name: str, query_name: str) -> Path:
 
 
 def _finch_revision() -> str:
+    """The finch actually imported: a git checkout's branch and commit (with
+    ``+dirty`` for uncommitted changes) when it is run from one, e.g. through
+    PYTHONPATH, else the installed distribution's recorded revision."""
     from importlib import metadata
 
+    import finch
+
+    source = Path(finch.__file__ or ".").resolve().parent
+    try:
+        def git(where, *cmd):
+            return subprocess.run(
+                ["git", "-C", str(where), *cmd], capture_output=True, text=True,
+                check=True,
+            ).stdout.strip()  # fmt: skip
+
+        top = Path(git(source, "rev-parse", "--show-toplevel"))
+        if ".pixi" not in source.parts and source.is_relative_to(top):
+            dirty = "+dirty" if git(top, "status", "--porcelain", "--", "src") else ""
+            return (
+                f"{git(top, 'rev-parse', '--abbrev-ref', 'HEAD')} @ "
+                f"{git(top, 'rev-parse', '--short=10', 'HEAD')}{dirty} ({top})"
+            )
+    except (subprocess.CalledProcessError, OSError, ValueError):
+        pass
     try:
         dist = metadata.distribution("finch-tensor")
         info = json.loads(dist.read_text("direct_url.json") or "{}")
@@ -374,7 +397,11 @@ def run_worker(args):
                 recorder = PlanRecorder(path, query, config, tensors)
             try:
                 record = measure_query(query, tensors, config, args.runs, recorder)
-                record["status"] = "ok" if record["correct"] else "wrong"
+                record["status"] = (
+                    "ok" if record["correct"]
+                    else "wrong" if query.ground_truth is not None
+                    else "unchecked"
+                )
             except Exception as error:  # record and keep going
                 message = f"{type(error).__name__}: {error}"
                 oom = isinstance(error, MemoryError) or "OutOfMemoryError" in message
@@ -523,6 +550,11 @@ class WorkerSlot:
     def run(self, query) -> dict:
         """Serve *query*; the record says which query of its worker it was
         (``worker_query``, 0 = the worker's first, cold, query)."""
+        recycle = self.args.max_queries_per_worker
+        if self.process is not None and recycle and self.served >= recycle:
+            # Long-lived workers accumulate compiled kernels and caches until
+            # they run out of memory, so start afresh now and then.
+            self.close()
         if self.process is None or self.process.poll() is not None:
             self._stop()
             self._start()
@@ -628,7 +660,7 @@ def run_config(args, config_name, queries, writer, csv_file):
 
 
 def _print_row(row):
-    if row["status"] in ("ok", "wrong"):
+    if row["status"] in ("ok", "wrong", "unchecked"):
         detail = (
             f"exec {row['exec_median_s']:.4g}s  plan {row['plan_total_s']:.4g}s  "
             f"first {row['first_s']:.4g}s  count {row['result']:.0f} "
@@ -645,14 +677,14 @@ def _geomean(values):
 
 
 def print_summary(rows, config_names):
-    statuses = ("ok", "wrong", "timeout", "oom", "error", "crash")
-    header = "".join(f"{s:>8}" for s in statuses)
-    print(f"\n{'config':38}{header}  geomean exec  geomean plan  (ok queries)")
+    statuses = ("ok", "unchecked", "wrong", "timeout", "oom", "error", "crash")
+    header = "".join(f"{s:>10}" for s in statuses)
+    print(f"\n{'config':38}{header}  geomean exec  geomean plan  (ok + unchecked)")
     for name in config_names:
         mine = [r for r in rows if r["config"] == name]
-        ok = [r for r in mine if r["status"] == "ok"]
+        ok = [r for r in mine if r["status"] in ("ok", "unchecked")]
         counts = "".join(
-            f"{sum(r['status'] == s for r in mine):8}" for s in statuses
+            f"{sum(r['status'] == s for r in mine):10}" for s in statuses
         )
         print(
             f"{name:38}{counts}  "
@@ -672,8 +704,18 @@ def main(argv=None):
     )
     parser.add_argument("--queries", nargs="+", help="query names (default: all)")
     parser.add_argument("--families", nargs="+", help="e.g. Star_3 Graph_3")
+    parser.add_argument(
+        "--sample", type=int, help="run a random sample of this many of the queries"
+    )
+    parser.add_argument("--sample-seed", type=int, default=0)
     parser.add_argument("--runs", type=int, default=5, help="timed cached executions")
     parser.add_argument("--timeout", type=float, default=600.0, help="seconds per query")
+    parser.add_argument(
+        "--max-queries-per-worker",
+        type=int,
+        default=100,
+        help="restart each worker after this many queries (0 never)",
+    )
     parser.add_argument(
         "--first-query-grace",
         type=float,
@@ -685,6 +727,13 @@ def main(argv=None):
         type=float,
         default=16.0,
         help="address-space limit per worker process (0 disables)",
+    )
+    parser.add_argument(
+        "--memory-fraction",
+        type=float,
+        default=0.75,
+        help="cap all workers together at this fraction of RAM, lowering the "
+        "per-worker limit if needed",
     )
     parser.add_argument("--data-dir", type=Path, default=None)
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
@@ -713,22 +762,35 @@ def main(argv=None):
         args.cpus = default_cpus()
     if args.jobs < 1 or args.jobs > len(args.cpus):
         parser.error(f"--jobs must be between 1 and the {len(args.cpus)} CPUs given")
+    # Keep all workers together within a share of RAM, so that a query which
+    # runs out of memory fails alone instead of the kernel's OOM killer
+    # taking down other processes.
     total_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024**3
-    if args.memory_limit_gb and args.jobs * args.memory_limit_gb > total_gb:
+    budget_gb = args.memory_fraction * total_gb
+    if args.memory_limit_gb and args.jobs * args.memory_limit_gb > budget_gb:
+        limit = math.floor(10 * budget_gb / args.jobs) / 10
         print(
-            f"warning: {args.jobs} workers x {args.memory_limit_gb:g} GB limit exceeds "
-            f"{total_gb:.0f} GB of RAM; the limit no longer protects the machine"
+            f"note: {args.jobs} workers x {args.memory_limit_gb:g} GB would exceed "
+            f"{args.memory_fraction:.0%} of {total_gb:.0f} GB RAM; limiting each "
+            f"worker to {limit:g} GB"
         )
+        args.memory_limit_gb = limit
 
     config_names = [config_label(parse_config(c)) for c in args.configs]
     graph = gcare.load_graph(args.dataset, args.data_dir)
     queries = gcare.load_queries(graph, args.queries, args.data_dir)
     if args.families:
         queries = [q for q in queries if q.family in args.families]
+    if args.sample is not None and args.sample < len(queries):
+        # Same sample for every config; reproducible from --sample-seed.
+        picked = random.Random(args.sample_seed).sample(range(len(queries)), args.sample)
+        queries = [queries[i] for i in sorted(picked)]
     print(
         f"{args.dataset}: {graph.num_vertices} vertices, "
         f"{sum(len(r) for r, _ in graph.matrices.values())} edges, "
-        f"{len(queries)} queries, configs {config_names}, "
+        f"{len(queries)} queries"
+        + (f" (sample, seed {args.sample_seed})" if args.sample is not None else "")
+        + f", configs {config_names}, "
         f"{args.jobs} worker(s) on cpus {args.cpus[: args.jobs]}"
     )
 

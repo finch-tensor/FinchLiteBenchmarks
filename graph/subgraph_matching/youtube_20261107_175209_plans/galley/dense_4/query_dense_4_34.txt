@@ -1,0 +1,92 @@
+# youtube dense_4/query_dense_4_34
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ 3e658228bb (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += V14[v_0] * V9[v_1] * V7[v_2] * V7[v_3] * E0[v_0,v_1] * E0[v_1,v_3] * E0[v_2,v_3]
+einsum:       a,b,c,d,ab,bd,cd->
+ground truth: 1353095
+vertices:     1134890
+operands:
+  E0     2-d  nnz 5975248
+  V14    1-d  nnz 45536
+  V7     1-d  nnz 45231
+  V9     1-d  nnz 45376
+
+==== after logic optimization (loop orderer input) ====
+#A#328[#i#250] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[#i#252], MapJoin(mul, A_62[#i#250], A_64[#i#252, #i#250])), #i#252)
+#A#329[#i#251] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#328[#i#250], MapJoin(mul, A_63[#i#251], A_64[#i#250, #i#251])), #i#250)
+#A#330[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#329[#i#251], MapJoin(mul, A_63[#i#253], A_64[#i#253, #i#251])), #i#251, #i#253)
+A_30[] = #A#330[]
+return A_30
+
+
+==== after loop ordering ====
+fuse(i_0):
+    fuse(i_1):
+        A_71[i_1, i_0] = A_64[i_0, i_1]
+fuse(#i#250):
+    fuse(#i#252):
+        #A#328[#i#250] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[#i#252], A_62[#i#250], A_71[#i#250, #i#252]), #i#252)
+fuse(#i#251):
+    fuse(#i#250):
+        #A#329[#i#251] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#328[#i#250], A_63[#i#251], A_71[#i#251, #i#250]), #i#250)
+fuse(#i#253):
+    fuse(#i#251):
+        #A#330[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#329[#i#251], A_63[#i#253], A_64[#i#253, #i#251]), #i#251, #i#253)
+return #A#330
+
+
+==== after workspacer (formatter input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_71[i_1, i_0] = A_64[i_0, i_1]
+fuse(#i#250):
+    fuse(#i#252):
+        #A#328[#i#250] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[#i#252], A_62[#i#250], A_71[#i#250, #i#252]), #i#252)
+fuse(#i#251):
+    fuse(#i#250):
+        #A#329[#i#251] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#328[#i#250], A_63[#i#251], A_71[#i#251, #i#250]), #i#250)
+fuse(#i#253):
+    fuse(#i#251):
+        #A#330[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#329[#i#251], A_63[#i#253], A_64[#i#253, #i#251]), #i#251, #i#253)
+return #A#330
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_71[i_1, i_0] = A_64[follow(i_0), walk(i_1)]
+fuse(#i#250):
+    fuse(#i#252):
+        #A#328[#i#250] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[gallop(#i#252)], A_62[walk(#i#250)], A_71[follow(#i#250), walk(#i#252)]), #i#252)
+fuse(#i#251):
+    fuse(#i#250):
+        #A#329[#i#251] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#328[gallop(#i#250)], A_63[walk(#i#251)], A_71[follow(#i#251), walk(#i#250)]), #i#250)
+fuse(#i#253):
+    fuse(#i#251):
+        #A#330[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#329[gallop(#i#251)], A_63[walk(#i#253)], A_64[follow(#i#253), walk(#i#251)]), #i#251, #i#253)
+return #A#330
+
+
+formats:
+  A_61             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_62             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_63             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_64             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_71             FiberTensorFType(DenseLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#328           FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  #A#329           FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  #A#330           FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         1353095.0
+  first_s        10.20768820901867
+  plan_total_s   4.360285272996407
+  stats_s        0.4150299649918452
+  logic_s        0.0597527569916565
+  loop_s         0.041716934996657073
+  workspace_s    0.0005087780300527811
+  lower_s        0.931822974991519
+  exec_median_s  1.4393776769866236
+  exec_samples   1.41373;1.43938;1.64334

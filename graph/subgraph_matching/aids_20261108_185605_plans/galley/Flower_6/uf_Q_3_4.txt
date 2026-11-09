@@ -1,0 +1,84 @@
+# aids Flower_6/uf_Q_3_4
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ dced910033 (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += V48[v_0] * E0[v_0,v_1] * E0[v_2,v_3] * E0[v_3,v_0] * E0[v_4,v_0] * E0[v_4,v_2]
+einsum:       a,ab,cd,da,ea,ec->
+ground truth: 7057
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  V48    1-d  nnz 14
+
+==== after logic optimization (loop orderer input) ====
+#A#42967[#i#42889, #i#42893] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#42889], MapJoin(mul, A_54[#i#42893, #i#42892], A_54[#i#42892, #i#42889])), #i#42892)
+#A#42968[#i#42889] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#42967[#i#42889, #i#42893], MapJoin(mul, A_54[#i#42891, #i#42889], A_54[#i#42891, #i#42893])), #i#42891, #i#42893)
+#A#42969[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#42968[#i#42889], A_54[#i#42889, #i#42890]), #i#42889, #i#42890)
+A_26[] = #A#42969[]
+return A_26
+
+
+==== after loop ordering ====
+fuse(#i#42893):
+    fuse(#i#42892):
+        fuse(#i#42889):
+            #A#42967[#i#42889, #i#42893] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#42889], A_54[#i#42893, #i#42892], A_54[#i#42892, #i#42889]), #i#42892)
+fuse(#i#42891):
+    fuse(#i#42889):
+        fuse(#i#42893):
+            #A#42968[#i#42889] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#42967[#i#42889, #i#42893], A_54[#i#42891, #i#42889], A_54[#i#42891, #i#42893]), #i#42891, #i#42893)
+fuse(#i#42889):
+    fuse(#i#42890):
+        #A#42969[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#42968[#i#42889], A_54[#i#42889, #i#42890]), #i#42889, #i#42890)
+return #A#42969
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#42893):
+    fuse(#i#42892):
+        fuse(#i#42889):
+            #A#42967[#i#42889, #i#42893] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#42889], A_54[#i#42893, #i#42892], A_54[#i#42892, #i#42889]), #i#42892)
+fuse(#i#42891):
+    fuse(#i#42889):
+        fuse(#i#42893):
+            #A#42968[#i#42889] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#42967[#i#42889, #i#42893], A_54[#i#42891, #i#42889], A_54[#i#42891, #i#42893]), #i#42891, #i#42893)
+fuse(#i#42889):
+    fuse(#i#42890):
+        #A#42969[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#42968[#i#42889], A_54[#i#42889, #i#42890]), #i#42889, #i#42890)
+return #A#42969
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#42893):
+    fuse(#i#42892):
+        fuse(#i#42889):
+            #A#42967[#i#42889, #i#42893] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[gallop(#i#42889)], A_54[follow(#i#42893), gallop(#i#42892)], A_54[follow(#i#42892), gallop(#i#42889)]), #i#42892)
+fuse(#i#42891):
+    fuse(#i#42889):
+        fuse(#i#42893):
+            #A#42968[#i#42889] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#42967[walk(#i#42889), walk(#i#42893)], A_54[follow(#i#42891), gallop(#i#42889)], A_54[follow(#i#42891), walk(#i#42893)]), #i#42891, #i#42893)
+fuse(#i#42889):
+    fuse(#i#42890):
+        #A#42969[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#42968[walk(#i#42889)], A_54[follow(#i#42889), walk(#i#42890)]), #i#42889, #i#42890)
+return #A#42969
+
+
+formats:
+  A_53             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_54             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#42967         FiberTensorFType(SparseHashLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#42968         FiberTensorFType(SparseHashLevelFType(ElementLevelFType(fv=0.0)))
+  #A#42969         FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         7057.0
+  first_s        6.183300948003307
+  plan_total_s   5.735415008035488
+  stats_s        0.016298287955578417
+  logic_s        0.019560180022381246
+  loop_s         0.0647070580162108
+  workspace_s    0.0005023860139772296
+  lower_s        3.28774080198491
+  exec_median_s  0.011567666020710021
+  exec_samples   0.0117003;0.0115677;0.0114747

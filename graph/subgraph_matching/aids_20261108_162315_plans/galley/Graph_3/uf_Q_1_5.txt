@@ -1,0 +1,61 @@
+# aids Graph_3/uf_Q_1_5
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ c01d987cbf+dirty (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += V34[v_0] * E0[v_0,v_1] * E1[v_1,v_2]
+einsum:       a,ab,bc->
+ground truth: 60
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  E1     2-d  nnz 48010
+  V34    1-d  nnz 17
+
+==== after logic optimization (loop orderer input) ====
+#A#118353[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#118333], MapJoin(mul, A_30[#i#118333, #i#118335], A_31[#i#118335, #i#118334])), #i#118333, #i#118334, #i#118335)
+A_14[] = #A#118353[]
+return A_14
+
+
+==== after loop ordering ====
+fuse(#i#118333):
+    fuse(#i#118335):
+        fuse(#i#118334):
+            #A#118353[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#118333], A_30[#i#118333, #i#118335], A_31[#i#118335, #i#118334]), #i#118333, #i#118334, #i#118335)
+return #A#118353
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#118333):
+    fuse(#i#118335):
+        fuse(#i#118334):
+            #A#118353[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#118333], A_30[#i#118333, #i#118335], A_31[#i#118335, #i#118334]), #i#118333, #i#118334, #i#118335)
+return #A#118353
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#118333):
+    fuse(#i#118335):
+        fuse(#i#118334):
+            #A#118353[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[walk(#i#118333)], A_30[follow(#i#118333), walk(#i#118335)], A_31[follow(#i#118335), walk(#i#118334)]), #i#118333, #i#118334, #i#118335)
+return #A#118353
+
+
+formats:
+  A_29             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_30             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_31             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#118353        FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         60.0
+  first_s        0.6934843820054084
+  plan_total_s   0.48042274301405996
+  stats_s        0.024065360019449145
+  logic_s        0.004061846993863583
+  loop_s         0.019931639020796865
+  workspace_s    0.00022678094683215022
+  lower_s        0.3049684390425682
+  exec_median_s  0.0014480769750662148
+  exec_samples   0.00172188;0.00144808;0.00139995

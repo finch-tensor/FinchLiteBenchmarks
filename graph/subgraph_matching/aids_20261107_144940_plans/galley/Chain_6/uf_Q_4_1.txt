@@ -1,0 +1,84 @@
+# aids Chain_6/uf_Q_4_1
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ b434ddbd78 (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += V48[v_1] * E0[v_1,v_0] * E0[v_2,v_1] * E0[v_3,v_2] * E0[v_4,v_3] * E0[v_5,v_4]
+einsum:       b,ba,cb,dc,ed,fe->
+ground truth: 19196
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  V48    1-d  nnz 14
+
+==== after logic optimization (loop orderer input) ====
+#A#67512[#i#67399] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#67402], MapJoin(mul, A_54[#i#67402, #i#67400], A_54[#i#67399, #i#67402])), #i#67400, #i#67402)
+#A#67513[#i#67398] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#67512[#i#67399], A_54[#i#67398, #i#67399]), #i#67399)
+#A#67514[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#67513[#i#67398], MapJoin(mul, A_54[#i#67401, #i#67398], A_54[#i#67403, #i#67401])), #i#67398, #i#67401, #i#67403)
+A_26[] = #A#67514[]
+return A_26
+
+
+==== after loop ordering ====
+fuse(#i#67399):
+    fuse(#i#67402):
+        fuse(#i#67400):
+            #A#67512[#i#67399] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#67402], A_54[#i#67402, #i#67400], A_54[#i#67399, #i#67402]), #i#67400, #i#67402)
+fuse(#i#67398):
+    fuse(#i#67399):
+        #A#67513[#i#67398] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#67512[#i#67399], A_54[#i#67398, #i#67399]), #i#67399)
+fuse(#i#67403):
+    fuse(#i#67401):
+        fuse(#i#67398):
+            #A#67514[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#67513[#i#67398], A_54[#i#67401, #i#67398], A_54[#i#67403, #i#67401]), #i#67398, #i#67401, #i#67403)
+return #A#67514
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#67399):
+    fuse(#i#67402):
+        fuse(#i#67400):
+            #A#67512[#i#67399] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#67402], A_54[#i#67402, #i#67400], A_54[#i#67399, #i#67402]), #i#67400, #i#67402)
+fuse(#i#67398):
+    fuse(#i#67399):
+        #A#67513[#i#67398] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#67512[#i#67399], A_54[#i#67398, #i#67399]), #i#67399)
+fuse(#i#67403):
+    fuse(#i#67401):
+        fuse(#i#67398):
+            #A#67514[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#67513[#i#67398], A_54[#i#67401, #i#67398], A_54[#i#67403, #i#67401]), #i#67398, #i#67401, #i#67403)
+return #A#67514
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#67399):
+    fuse(#i#67402):
+        fuse(#i#67400):
+            #A#67512[#i#67399] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[gallop(#i#67402)], A_54[follow(#i#67402), walk(#i#67400)], A_54[follow(#i#67399), gallop(#i#67402)]), #i#67400, #i#67402)
+fuse(#i#67398):
+    fuse(#i#67399):
+        #A#67513[#i#67398] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#67512[gallop(#i#67399)], A_54[follow(#i#67398), gallop(#i#67399)]), #i#67399)
+fuse(#i#67403):
+    fuse(#i#67401):
+        fuse(#i#67398):
+            #A#67514[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#67513[walk(#i#67398)], A_54[follow(#i#67401), gallop(#i#67398)], A_54[follow(#i#67403), gallop(#i#67401)]), #i#67398, #i#67401, #i#67403)
+return #A#67514
+
+
+formats:
+  A_53             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_54             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#67512         FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  #A#67513         FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  #A#67514         FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         19196.0
+  first_s        2.121924842998851
+  plan_total_s   1.8798522220167797
+  stats_s        0.018533539987402037
+  logic_s        0.025736915005836636
+  loop_s         0.08006560101057403
+  workspace_s    0.0005346180114429444
+  lower_s        1.2854729989776388
+  exec_median_s  0.019531942991307005
+  exec_samples   0.0195319;0.0195402;0.0194382

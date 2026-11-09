@@ -1,0 +1,123 @@
+# aids Graph_6/uf_Q_4_4
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ c01d987cbf+dirty (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += E0[v_1,v_0] * E0[v_1,v_2] * E0[v_1,v_3] * E1[v_3,v_5] * E0[v_4,v_0] * E0[v_4,v_5]
+einsum:       ba,bc,bd,df,ea,ef->
+ground truth: 33672
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  E1     2-d  nnz 48010
+
+==== after logic optimization (loop orderer input) ====
+#A#110950[#i#110718, #i#110713] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#110718, #i#110714], A_53[#i#110713, #i#110714]), #i#110714)
+#A#110951[#i#110716, #i#110713] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_54[#i#110716, #i#110717], A_53[#i#110713, #i#110717]), #i#110717)
+#A#110952[#i#110718] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#110950[#i#110718, #i#110713], MapJoin(mul, A_53[#i#110718, #i#110716], #A#110951[#i#110716, #i#110713])), #i#110713, #i#110716)
+#A#110953[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#110952[#i#110718], A_53[#i#110718, #i#110715]), #i#110715, #i#110718)
+A_26[] = #A#110953[]
+return A_26
+
+
+==== after loop ordering ====
+fuse(i_0):
+    fuse(i_1):
+        A_61[i_1, i_0] = A_53[i_0, i_1]
+fuse(i_0):
+    fuse(i_1):
+        A_62[i_1, i_0] = A_54[i_0, i_1]
+fuse(#i#110718):
+    fuse(#i#110714):
+        fuse(#i#110713):
+            #A#110950[#i#110718, #i#110713] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#110718, #i#110714], A_61[#i#110714, #i#110713]), #i#110714)
+fuse(#i#110713):
+    fuse(#i#110717):
+        fuse(#i#110716):
+            #A#110951[#i#110716, #i#110713] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_62[#i#110717, #i#110716], A_53[#i#110713, #i#110717]), #i#110717)
+fuse(#i#110718):
+    fuse(#i#110716):
+        fuse(#i#110713):
+            #A#110952[#i#110718] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#110950[#i#110718, #i#110713], A_53[#i#110718, #i#110716], #A#110951[#i#110716, #i#110713]), #i#110713, #i#110716)
+fuse(#i#110718):
+    fuse(#i#110715):
+        #A#110953[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#110952[#i#110718], A_53[#i#110718, #i#110715]), #i#110715, #i#110718)
+return #A#110953
+
+
+==== after workspacer (formatter input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_61[i_1, i_0] = A_53[i_0, i_1]
+fuse(i_0):
+    fuse(i_1):
+        A_62[i_1, i_0] = A_54[i_0, i_1]
+fuse(#i#110718):
+    fuse(#i#110714):
+        fuse(#i#110713):
+            #A#110950_ws(#i#110718)[#i#110713] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#110718, #i#110714], A_61[#i#110714, #i#110713]), #i#110714)
+    fuse(#i#110713):
+        #A#110950[#i#110718, #i#110713] = #A#110950_ws(#i#110718)[#i#110713]
+fuse(#i#110713):
+    fuse(#i#110717):
+        fuse(#i#110716):
+            #A#110951[#i#110716, #i#110713] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_62[#i#110717, #i#110716], A_53[#i#110713, #i#110717]), #i#110717)
+fuse(#i#110718):
+    fuse(#i#110716):
+        fuse(#i#110713):
+            #A#110952[#i#110718] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#110950[#i#110718, #i#110713], A_53[#i#110718, #i#110716], #A#110951[#i#110716, #i#110713]), #i#110713, #i#110716)
+fuse(#i#110718):
+    fuse(#i#110715):
+        #A#110953[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#110952[#i#110718], A_53[#i#110718, #i#110715]), #i#110715, #i#110718)
+return #A#110953
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_61[i_1, i_0] = A_53[follow(i_0), gallop(i_1)]
+fuse(i_0):
+    fuse(i_1):
+        A_62[i_1, i_0] = A_54[follow(i_0), gallop(i_1)]
+fuse(#i#110718):
+    fuse(#i#110714):
+        fuse(#i#110713):
+            #A#110950_ws(#i#110718)[#i#110713] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[follow(#i#110718), gallop(#i#110714)], A_61[follow(#i#110714), walk(#i#110713)]), #i#110714)
+    fuse(#i#110713):
+        #A#110950[#i#110718, #i#110713] = #A#110950_ws(#i#110718)[walk(#i#110713)]
+fuse(#i#110713):
+    fuse(#i#110717):
+        fuse(#i#110716):
+            #A#110951[#i#110716, #i#110713] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_62[follow(#i#110717), walk(#i#110716)], A_53[follow(#i#110713), gallop(#i#110717)]), #i#110717)
+fuse(#i#110718):
+    fuse(#i#110716):
+        fuse(#i#110713):
+            #A#110952[#i#110718] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#110950[follow(#i#110718), walk(#i#110713)], A_53[follow(#i#110718), gallop(#i#110716)], #A#110951[follow(#i#110716), walk(#i#110713)]), #i#110713, #i#110716)
+fuse(#i#110718):
+    fuse(#i#110715):
+        #A#110953[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#110952[follow(#i#110718)], A_53[follow(#i#110718), gallop(#i#110715)]), #i#110715, #i#110718)
+return #A#110953
+
+
+formats:
+  A_53             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_54             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_61             FiberTensorFType(DenseLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  A_62             FiberTensorFType(SparseByteMapLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#110950_ws     FiberTensorFType(SparseHashLevelFType(ElementLevelFType(fv=0.0)))
+  #A#110950        FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#110951        FiberTensorFType(SparseByteMapLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#110952        FiberTensorFType(DenseLevelFType(ElementLevelFType(fv=0.0)))
+  #A#110953        FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         33672.0
+  first_s        5.992441063979641
+  plan_total_s   5.3100326110143214
+  stats_s        0.021483693039044738
+  logic_s        0.062113391992170364
+  loop_s         0.10955000499961898
+  workspace_s    0.23278234206372872
+  lower_s        2.6090984599431977
+  exec_median_s  0.05877844296628609
+  exec_samples   0.0586118;0.0596177;0.0587784

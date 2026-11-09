@@ -8,8 +8,9 @@ from these choices:
 * loop: ``default``, ``greedy``, ``bfs`` or ``dfs`` loop orderer
 * formatter: ``fd`` (FDFormatter), ``galley`` (GalleyFormatter with cost-based
   protocols) or ``dense`` (DefaultLogicFormatter)
-* stats: ``dc`` (memoised degree constraints), ``sampling`` (memoised
-  sampling statistics, randomly seeded), ``fd`` or ``uniform``
+* stats: ``dc`` (memoised degree constraints), ``lp`` (memoised LpBound
+  statistics), ``sampling`` (memoised sampling statistics, randomly seeded),
+  ``fd`` or ``uniform``
 * workspace: whether a LogicWorkspacer sits between loop ordering and
   formatting (spelled as a trailing ``/ws``)
 
@@ -53,9 +54,15 @@ from finch.autoschedule.loop_orderer.loop_ordering import DefaultLoopOrderer
 from finch.autoschedule.normalize import LogicNormalizer
 from finch.autoschedule.protocolizer import CostProtocolizer
 from finch.autoschedule.workspacer import LogicWorkspacer
+
+try:  # finch-tensor kbd/subgraph-fixes: price workspaces with Galley's formats
+    from finch.autoschedule.workspacer import galley_format_cost
+except ImportError:  # older finch-tensor
+    galley_format_cost = None
 from finch.autoschedule.tensor_stats import (
     DCStatsFactory,
     FDStatsFactory,
+    LPStatsFactory,
     SamplingStatsFactory,
     UniformStatsFactory,
 )
@@ -73,6 +80,8 @@ LOOP_ORDERERS = {
 FORMATTERS = ("fd", "galley", "dense")
 STATS = {
     "dc": lambda: MemoStatsFactory(DCStatsFactory()),
+    # LpBound: degree-sequence norms p in (0, 1, 2, 3, 4, 5, inf), LP-flow bound
+    "lp": lambda: MemoStatsFactory(LPStatsFactory()),
     # defaults: sample_nnz=10_000, estimator="sh3"
     "sampling": lambda: MemoStatsFactory(SamplingStatsFactory()),
     "fd": FDStatsFactory,
@@ -108,6 +117,8 @@ class SchedulerConfig:
 PRESETS = {
     "default": SchedulerConfig("default", "default", "fd", "fd"),
     "galley": SchedulerConfig("galley-bfs", "bfs", "galley", "dc", workspace=True),
+    # galley with LpBound statistics instead of degree constraints
+    "galley-lp": SchedulerConfig("galley-bfs", "bfs", "galley", "lp", workspace=True),
     # galley with sampling statistics instead of degree constraints
     "galley-sampling": SchedulerConfig(
         "galley-bfs", "bfs", "galley", "sampling", workspace=True
@@ -248,7 +259,12 @@ def build_scheduler(config: SchedulerConfig, cache: bool = True, on_program=None
     formatter = _TimedStage(formatter, timer, "lower")
     if config.workspace:
         formatter = tap(formatter, "workspace")
-        formatter = _TimedStage(LogicWorkspacer(formatter), timer, "workspace")
+        # Like COMPILE_JULIA_GALLEY, price workspaces with the formats the
+        # formatter downstream chooses, where finch can.
+        options = {}
+        if config.formatter == "galley" and galley_format_cost is not None:
+            options["format_cost"] = galley_format_cost
+        formatter = _TimedStage(LogicWorkspacer(formatter, **options), timer, "workspace")
     formatter = tap(formatter, "loop")
     loop = _TimedStage(LOOP_ORDERERS[config.loop](formatter), timer, "loop")
     simplified = tap(LogicSimplify(loop), "logic")

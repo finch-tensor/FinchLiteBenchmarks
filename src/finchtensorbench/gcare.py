@@ -149,8 +149,151 @@ def parse_graph(path: str | Path, name: str | None = None) -> GCareGraph:
 
 
 def load_graph(dataset: str, root: str | Path | None = None) -> GCareGraph:
+    if dataset in SGM_DATASETS:
+        return parse_sgm_graph(ensure_sgm_downloaded(dataset, root) / "graph.txt", dataset)
     root = ensure_downloaded(root)
     return parse_graph(root / "dataset" / dataset / f"{dataset}.txt", name=dataset)
+
+
+# ---------------------------------------------------------------------------
+# Subgraph-matching benchmark graphs (as in Galley.jl's experiments)
+# ---------------------------------------------------------------------------
+
+# The in-memory subgraph matching benchmark of Sun & Luo (SIGMOD 2020) uses
+# undirected graphs with one label per vertex and unlabelled edges.  Galley.jl's
+# experiments use its yeast, dblp and youtube graphs with a "lite" sample of
+# their queries; the files are fetched from that repository at a pinned commit.
+_GALLEY_DATA = (
+    "https://raw.githubusercontent.com/kylebd99/Galley.jl/"
+    "e6fad3fcd7f1b1932b2529c89f59854f09a9a79b/Experiments/Data"
+)
+_LITE_IDS = [i for i in range(1, 201) if i % 10 in (0, 2, 4)]
+
+# dataset -> (graph path, its sha256, query directory, query names)
+SGM_DATASETS = {
+    name: (
+        f"Subgraph_Data/{name}/{name}.graph",
+        sha256,
+        f"{name}-lite",
+        [f"{kind}/query_{kind}_{i}" for kind in ("dense_4", "sparse_8") for i in _LITE_IDS],
+    )
+    for name, sha256 in (
+        ("yeast", "dd0119d77bcd95402da2fa8b2edc769de07c7d71837b2cd5fdeaa38c5b07302f"),
+        ("dblp", "179ad985ed535a543bd98287f7e98122342789ae11648a830c46212a20de1ea0"),
+        ("youtube", "473670a4dadb48aaaa973f392ea22cd3a1cf7bb9fb446bdd43795465d04084ea"),
+    )
+}
+
+
+def ensure_sgm_downloaded(dataset: str, root: str | Path | None = None) -> Path:
+    """Fetch *dataset*'s graph, queries, and true counts into ``<root>/sgm/<dataset>``.
+
+    A query's true count lives at ``truth/<name>.txt``; it is absent for the
+    few queries Galley.jl has none for.
+    """
+    import hashlib
+    import urllib.error
+    import urllib.request
+
+    from filelock import FileLock
+
+    graph_path, sha256, query_dir, names = SGM_DATASETS[dataset]
+    target = data_dir(root) / "sgm" / dataset
+    target.mkdir(parents=True, exist_ok=True)
+    marker = target / f".complete-{sha256}"
+    with FileLock(str(target / ".download.lock")):
+        if marker.exists():
+            return target
+
+        def fetch(path: str) -> bytes | None:
+            try:
+                with urllib.request.urlopen(f"{_GALLEY_DATA}/{path}") as response:
+                    return response.read()
+            except urllib.error.HTTPError as error:
+                if error.code == 404:
+                    return None
+                raise
+
+        graph = fetch(graph_path)
+        if graph is None or hashlib.sha256(graph).hexdigest() != sha256:
+            raise RuntimeError(f"bad download of {graph_path}")
+        (target / "graph.txt").write_bytes(graph)
+        for name in names:
+            stem = name.split("/")[1]
+            for kind, folder in (("queries", f"Subgraph_Queries/{query_dir}"),
+                                 ("truth", f"Subgraph_TrueCardinalities/{dataset}")):
+                data = fetch(f"{folder}/{stem}.graph")
+                if data is None and kind == "queries":
+                    raise RuntimeError(f"missing query {name}")
+                if data is not None:
+                    path = target / kind / f"{name}.txt"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(data)
+        marker.touch()
+    return target
+
+
+def parse_sgm_graph(path: str | Path, name: str) -> GCareGraph:
+    """Parse a ``t n m``/``v id label degree``/``e u v label`` graph file.
+
+    Edges are undirected, so ``E0`` holds both directions of each.
+    """
+    vertex_ids: list[int] = []
+    labels: list[int] = []
+    edges: list[tuple[int, int]] = []
+    with Path(path).open("r", encoding="utf-8") as file:
+        for line in file:
+            if line.startswith("v"):
+                vals = line.split()
+                vertex_ids.append(int(vals[1]))
+                labels.append(int(vals[2]))
+            elif line.startswith("e"):
+                vals = line.split()
+                edges.append((int(vals[1]), int(vals[2])))
+    ids = np.asarray(vertex_ids, dtype=np.int64)
+    label_of = np.asarray(labels, dtype=np.int64)
+    max_vid = int(ids.max())
+    graph = GCareGraph(name=name, max_vid=max_vid, continuous_ids=max_vid + 1 == len(ids))
+    for label in np.unique(label_of):
+        graph.vectors[f"V{label}"] = np.sort(ids[label_of == label])
+    pairs = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
+    both = np.unique(np.concatenate([pairs, pairs[:, ::-1]]), axis=0)
+    graph.matrices["E0"] = (both[:, 0].copy(), both[:, 1].copy())
+    if not graph.continuous_ids:
+        graph.vectors["C"] = np.sort(ids)
+    return graph
+
+
+def parse_sgm_query(
+    path: str | Path,
+    *,
+    continuous_ids: bool = True,
+    dataset: str = "",
+    name: str = "",
+    ground_truth: int | None = None,
+) -> GCareQuery:
+    """Parse a ``v qid label degree``/``e q1 q2 label`` query: every vertex is
+    labelled and every edge reads ``E0``."""
+    vertices: list[int] = []
+    operands: list[Operand] = []
+    with Path(path).open("r", encoding="utf-8") as file:
+        for line in file:
+            vals = line.split()
+            if line.startswith("v"):
+                qv = int(vals[1])
+                vertices.append(qv)
+                operands.append(Operand(f"V{int(vals[2])}", (qv,)))
+                if not continuous_ids:
+                    operands.append(Operand("C", (qv,)))
+            elif line.startswith("e"):
+                operands.append(Operand("E0", (int(vals[1]), int(vals[2]))))
+    return GCareQuery(
+        dataset=dataset,
+        name=name,
+        vertices=tuple(vertices),
+        operands=tuple(operands),
+        ground_truth=ground_truth,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +398,8 @@ def _read_ground_truth(path: Path) -> int | None:
 
 def list_queries(dataset: str, root: str | Path | None = None) -> list[str]:
     """Query names (e.g. ``Star_3/uf_Q_0_1``) available for *dataset*, sorted."""
+    if dataset in SGM_DATASETS:
+        return sorted(SGM_DATASETS[dataset][3])
     root = ensure_downloaded(root)
     base = root / "queryset" / dataset
     return sorted(p.relative_to(base).with_suffix("").as_posix() for p in base.rglob("*.txt"))
@@ -270,12 +415,17 @@ def load_queries(
     Ground truth is matched by the query's relative path.  (SAPS matched by
     file stem, but stems such as ``uf_Q_1_1`` repeat across query families.)
     """
-    root = ensure_downloaded(root)
-    query_root = root / "queryset" / graph.name
-    truth_root = root / "ground_truth" / graph.name
+    if graph.name in SGM_DATASETS:
+        root = ensure_sgm_downloaded(graph.name, root)
+        query_root, truth_root, parse = root / "queries", root / "truth", parse_sgm_query
+    else:
+        root = ensure_downloaded(root)
+        query_root = root / "queryset" / graph.name
+        truth_root = root / "ground_truth" / graph.name
+        parse = parse_query
     names = list_queries(graph.name, root) if names is None else names
     return [
-        parse_query(
+        parse(
             query_root / f"{name}.txt",
             continuous_ids=graph.continuous_ids,
             dataset=graph.name,

@@ -1,0 +1,94 @@
+# aids Chain_6/uf_Q_4_16
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ cc30998981 (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += V4[v_2] * E0[v_0,v_1] * E0[v_1,v_2] * E0[v_3,v_2] * E0[v_4,v_3] * E0[v_5,v_4]
+einsum:       c,ab,bc,dc,ed,fe->
+ground truth: 77506
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  V4     1-d  nnz 4328
+
+==== after logic optimization (loop orderer input) ====
+#A#82129[#i#82007] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#82007], MapJoin(mul, A_54[#i#82009, #i#82006], A_54[#i#82006, #i#82007])), #i#82006, #i#82009)
+#A#82130[#i#82005] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#82129[#i#82007], MapJoin(mul, A_54[#i#82008, #i#82007], A_54[#i#82005, #i#82008])), #i#82007, #i#82008)
+#A#82131[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#82130[#i#82005], A_54[#i#82004, #i#82005]), #i#82004, #i#82005)
+A_26[] = #A#82131[]
+return A_26
+
+
+==== after loop ordering ====
+fuse(i_0):
+    fuse(i_1):
+        A_61[i_1, i_0] = A_54[i_0, i_1]
+fuse(#i#82007):
+    fuse(#i#82006):
+        fuse(#i#82009):
+            #A#82129[#i#82007] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#82007], A_61[#i#82006, #i#82009], A_61[#i#82007, #i#82006]), #i#82006, #i#82009)
+fuse(#i#82005):
+    fuse(#i#82008):
+        fuse(#i#82007):
+            #A#82130[#i#82005] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#82129[#i#82007], A_54[#i#82008, #i#82007], A_54[#i#82005, #i#82008]), #i#82007, #i#82008)
+fuse(#i#82004):
+    fuse(#i#82005):
+        #A#82131[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#82130[#i#82005], A_54[#i#82004, #i#82005]), #i#82004, #i#82005)
+return #A#82131
+
+
+==== after workspacer (formatter input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_61[i_1, i_0] = A_54[i_0, i_1]
+fuse(#i#82007):
+    fuse(#i#82006):
+        fuse(#i#82009):
+            #A#82129[#i#82007] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#82007], A_61[#i#82006, #i#82009], A_61[#i#82007, #i#82006]), #i#82006, #i#82009)
+fuse(#i#82005):
+    fuse(#i#82008):
+        fuse(#i#82007):
+            #A#82130[#i#82005] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#82129[#i#82007], A_54[#i#82008, #i#82007], A_54[#i#82005, #i#82008]), #i#82007, #i#82008)
+fuse(#i#82004):
+    fuse(#i#82005):
+        #A#82131[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#82130[#i#82005], A_54[#i#82004, #i#82005]), #i#82004, #i#82005)
+return #A#82131
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_61[i_1, i_0] = A_54[follow(i_0), gallop(i_1)]
+fuse(#i#82007):
+    fuse(#i#82006):
+        fuse(#i#82009):
+            #A#82129[#i#82007] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[walk(#i#82007)], A_61[follow(#i#82006), walk(#i#82009)], A_61[follow(#i#82007), walk(#i#82006)]), #i#82006, #i#82009)
+fuse(#i#82005):
+    fuse(#i#82008):
+        fuse(#i#82007):
+            #A#82130[#i#82005] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#82129[gallop(#i#82007)], A_54[follow(#i#82008), walk(#i#82007)], A_54[follow(#i#82005), gallop(#i#82008)]), #i#82007, #i#82008)
+fuse(#i#82004):
+    fuse(#i#82005):
+        #A#82131[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#82130[follow(#i#82005)], A_54[follow(#i#82004), gallop(#i#82005)]), #i#82004, #i#82005)
+return #A#82131
+
+
+formats:
+  A_53             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_54             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_61             FiberTensorFType(DenseLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#82129         FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  #A#82130         FiberTensorFType(DenseLevelFType(ElementLevelFType(fv=0.0)))
+  #A#82131         FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         77506.0
+  first_s        2.935327095008688
+  plan_total_s   2.6388631680165417
+  stats_s        0.02059376798570156
+  logic_s        0.03401201299857348
+  loop_s         0.09312156497617252
+  workspace_s    0.0006245500408113003
+  lower_s        1.4087911929818802
+  exec_median_s  0.3620478689845186
+  exec_samples   0.363614;0.36123;0.362048

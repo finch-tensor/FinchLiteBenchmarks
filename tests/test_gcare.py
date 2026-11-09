@@ -86,6 +86,25 @@ def test_noncontiguous_ids_add_existence_vector(tmp_path):
     assert query.saps_expr() == "S[] += C[v_0]"
 
 
+def test_sgm_graph_is_undirected_and_queries_label_every_vertex(tmp_path):
+    # A triangle 0-1-2 plus the edge 2-3, given once per edge (and 0-1 twice).
+    path = tmp_path / "g.graph"
+    path.write_text(
+        "t 4 4\nv 0 7 2\nv 1 7 2\nv 2 8 3\nv 3 7 1\n"
+        "e 0 1 0\ne 1 2 0\ne 0 2 0\ne 2 3 0\ne 1 0 0\n"
+    )
+    graph = gcare.parse_sgm_graph(path, "toy")
+    assert graph.continuous_ids and graph.vectors["V7"].tolist() == [0, 1, 3]
+    assert len(graph.matrices["E0"][0]) == 8
+    query_path = tmp_path / "q.graph"
+    query_path.write_text("t 2 1\nv 0 7 1\nv 1 8 1\ne 0 1 0\n")
+    query = gcare.parse_sgm_query(query_path)
+    assert query.saps_expr() == "S[] += V7[v_0] * V8[v_1] * E0[v_0,v_1]"
+    operands = [_dense(graph, op.tensor) for op in query.operands]
+    # Each label-7 neighbour of vertex 2 (0, 1 and 3) matches once.
+    assert np.einsum(query.subscripts(), *operands) == 3
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("config", ["default", "galley"])
 def test_counts_finch(toy, config):

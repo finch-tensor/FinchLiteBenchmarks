@@ -1,0 +1,84 @@
+# yeast dense_4/query_dense_4_200
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ 3e658228bb (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += V3[v_0] * V17[v_1] * V2[v_2] * V38[v_3] * E0[v_0,v_1] * E0[v_1,v_3] * E0[v_2,v_3]
+einsum:       a,b,c,d,ab,bd,cd->
+ground truth: 3
+vertices:     3112
+operands:
+  E0     2-d  nnz 25038
+  V17    1-d  nnz 84
+  V2     1-d  nnz 622
+  V3     1-d  nnz 287
+  V38    1-d  nnz 2
+
+==== after logic optimization (loop orderer input) ====
+#A#13433[#i#13358] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[#i#13355], MapJoin(mul, A_62[#i#13358], A_65[#i#13355, #i#13358])), #i#13355)
+#A#13434[#i#13357] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_63[#i#13356], MapJoin(mul, A_64[#i#13357], A_65[#i#13356, #i#13357])), #i#13356)
+#A#13435[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#13433[#i#13358], MapJoin(mul, #A#13434[#i#13357], A_65[#i#13358, #i#13357])), #i#13357, #i#13358)
+A_30[] = #A#13435[]
+return A_30
+
+
+==== after loop ordering ====
+fuse(#i#13355):
+    fuse(#i#13358):
+        #A#13433[#i#13358] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[#i#13355], A_62[#i#13358], A_65[#i#13355, #i#13358]), #i#13355)
+fuse(#i#13356):
+    fuse(#i#13357):
+        #A#13434[#i#13357] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_63[#i#13356], A_64[#i#13357], A_65[#i#13356, #i#13357]), #i#13356)
+fuse(#i#13358):
+    fuse(#i#13357):
+        #A#13435[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#13433[#i#13358], #A#13434[#i#13357], A_65[#i#13358, #i#13357]), #i#13357, #i#13358)
+return #A#13435
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#13355):
+    fuse(#i#13358):
+        #A#13433[#i#13358] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[#i#13355], A_62[#i#13358], A_65[#i#13355, #i#13358]), #i#13355)
+fuse(#i#13356):
+    fuse(#i#13357):
+        #A#13434[#i#13357] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_63[#i#13356], A_64[#i#13357], A_65[#i#13356, #i#13357]), #i#13356)
+fuse(#i#13358):
+    fuse(#i#13357):
+        #A#13435[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#13433[#i#13358], #A#13434[#i#13357], A_65[#i#13358, #i#13357]), #i#13357, #i#13358)
+return #A#13435
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#13355):
+    fuse(#i#13358):
+        #A#13433[#i#13358] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[walk(#i#13355)], A_62[walk(#i#13358)], A_65[follow(#i#13355), walk(#i#13358)]), #i#13355)
+fuse(#i#13356):
+    fuse(#i#13357):
+        #A#13434[#i#13357] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_63[walk(#i#13356)], A_64[gallop(#i#13357)], A_65[follow(#i#13356), gallop(#i#13357)]), #i#13356)
+fuse(#i#13358):
+    fuse(#i#13357):
+        #A#13435[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#13433[walk(#i#13358)], #A#13434[walk(#i#13357)], A_65[follow(#i#13358), gallop(#i#13357)]), #i#13357, #i#13358)
+return #A#13435
+
+
+formats:
+  A_61             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_62             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_63             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_64             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_65             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#13433         FiberTensorFType(SparseHashLevelFType(ElementLevelFType(fv=0.0)))
+  #A#13434         FiberTensorFType(SparseHashLevelFType(ElementLevelFType(fv=0.0)))
+  #A#13435         FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         3.0
+  first_s        2.4342059300106484
+  plan_total_s   1.9037652920233086
+  stats_s        0.004525014985119924
+  logic_s        0.018723693006904796
+  loop_s         0.03815486398525536
+  workspace_s    0.0004453810106497258
+  lower_s        1.0460924039944075
+  exec_median_s  0.0030203429923858494
+  exec_samples   0.00340445;0.00302034;0.00301224

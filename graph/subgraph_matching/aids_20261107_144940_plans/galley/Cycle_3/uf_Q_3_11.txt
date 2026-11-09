@@ -1,0 +1,67 @@
+# aids Cycle_3/uf_Q_3_11
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes @ b434ddbd78 (/home/kylebd99/finch-tensor/.claude/worktrees/subgraph-fixes)
+
+query:        S[] += E0[v_0,v_1] * E0[v_0,v_2] * E0[v_2,v_1]
+einsum:       ab,ac,cb->
+ground truth: 3240
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+
+==== after logic optimization (loop orderer input) ====
+#A#3763[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#3745, #i#3743], MapJoin(mul, A_29[#i#3745, #i#3744], A_29[#i#3744, #i#3743])), #i#3743, #i#3744, #i#3745)
+A_14[] = #A#3763[]
+return A_14
+
+
+==== after loop ordering ====
+fuse(i_0):
+    fuse(i_1):
+        A_34[i_1, i_0] = A_29[i_0, i_1]
+fuse(#i#3745):
+    fuse(#i#3743):
+        fuse(#i#3744):
+            #A#3763[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#3745, #i#3743], A_29[#i#3745, #i#3744], A_34[#i#3743, #i#3744]), #i#3743, #i#3744, #i#3745)
+return #A#3763
+
+
+==== after workspacer (formatter input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_34[i_1, i_0] = A_29[i_0, i_1]
+fuse(#i#3745):
+    fuse(#i#3743):
+        fuse(#i#3744):
+            #A#3763[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[#i#3745, #i#3743], A_29[#i#3745, #i#3744], A_34[#i#3743, #i#3744]), #i#3743, #i#3744, #i#3745)
+return #A#3763
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_34[i_1, i_0] = A_29[follow(i_0), gallop(i_1)]
+fuse(#i#3745):
+    fuse(#i#3743):
+        fuse(#i#3744):
+            #A#3763[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_29[follow(#i#3745), gallop(#i#3743)], A_29[follow(#i#3745), walk(#i#3744)], A_34[follow(#i#3743), walk(#i#3744)]), #i#3743, #i#3744, #i#3745)
+return #A#3763
+
+
+formats:
+  A_29             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_34             FiberTensorFType(DenseLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#3763          FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         3240.0
+  first_s        1.298683521017665
+  plan_total_s   1.3015066150110215
+  stats_s        0.018230548012070358
+  logic_s        0.005117207998409867
+  loop_s         0.040273546997923404
+  workspace_s    0.00033382000401616096
+  lower_s        0.892502898001112
+  exec_median_s  0.02119406798738055
+  exec_samples   0.0211941;0.021894;0.0198438
