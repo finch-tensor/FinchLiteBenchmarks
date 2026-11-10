@@ -71,12 +71,20 @@ def plot(paths, out=None, paired=False, palette=None):
         # Only queries every config finished with a correct count, so every box
         # is over the same queries (a config that fails the hard ones is not
         # flattered by them being left out of its box only).
-        good = defaultdict(set)
+        # Pairing is within each (dataset, family), over the configs that ran
+        # there, so a config run on only some datasets doesn't empty the rest.
+        ran = defaultdict(set)  # (dataset, family) -> configs
+        good = defaultdict(set)  # (dataset, query) -> configs that got it right
         for r in rows:
+            ran[(r["dataset"], r["family"])].add(r["config"])
             if r["status"] in ("ok", "unchecked"):
-                good[r["config"]].add((r["dataset"], r["query"]))
-        common = set.intersection(*good.values()) if good else set()
-        dropped = len({(r["dataset"], r["query"]) for r in rows} - common)
+                good[(r["dataset"], r["query"])].add(r["config"])
+        family = {(r["dataset"], r["query"]): r["family"] for r in rows}
+        common = {
+            key for key, configs in good.items()
+            if configs >= ran[(key[0], family[key])]
+        }
+        dropped = len(set(family) - common)
         rows = [r for r in rows if (r["dataset"], r["query"]) in common
                 or r["status"] not in ("ok", "unchecked")]
     families = sorted({r["family"] for r in rows}, key=_family_key)
@@ -131,7 +139,10 @@ def plot(paths, out=None, paired=False, palette=None):
         ax.yaxis.set_major_formatter(FuncFormatter(_seconds))
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.set_xticks(range(len(groups)))
-        counts = Counter(group_of(r) for r in rows if r["config"] == configs[0])
+        counts = Counter(
+            group_of(r) for r in rows if r["config"] == configs[0]
+            and (not paired or r["status"] in ("ok", "unchecked"))
+        )
         counts["All"] = sum(counts.values())
         ax.set_xticklabels(
             [f"{g}\nn={counts[g]}" for g in groups], fontsize=8, color=TEXT_2
