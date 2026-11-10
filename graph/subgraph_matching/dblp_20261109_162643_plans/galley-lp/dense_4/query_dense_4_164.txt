@@ -1,0 +1,81 @@
+# dblp dense_4/query_dense_4_164
+# config: galley-lp (galley-bfs/bfs/galley/lp/ws)
+# finch-tensor kbd/subgraph-fixes-loop-model @ 1def9d8238+dirty (/home/kdeeds/finch-tensor/.claude/worktrees/loop-model)
+
+query:        S[] += V14[v_0] * V4[v_1] * V13[v_2] * V14[v_3] * E0[v_0,v_1] * E0[v_0,v_2] * E0[v_0,v_3] * E0[v_1,v_2] * E0[v_1,v_3] * E0[v_2,v_3]
+einsum:       a,b,c,d,ab,ac,ad,bc,bd,cd->
+ground truth: 11676
+vertices:     317080
+operands:
+  E0     2-d  nnz 2099732
+  V13    1-d  nnz 21474
+  V14    1-d  nnz 21255
+  V4     1-d  nnz 21068
+
+==== after logic optimization (loop orderer input) ====
+#A#3288[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_85[#i#3248], MapJoin(mul, A_86[#i#3245], MapJoin(mul, A_87[#i#3246], MapJoin(mul, A_85[#i#3247], MapJoin(mul, A_88[#i#3248, #i#3245], MapJoin(mul, A_88[#i#3248, #i#3246], MapJoin(mul, A_88[#i#3248, #i#3247], MapJoin(mul, A_88[#i#3245, #i#3246], MapJoin(mul, A_88[#i#3245, #i#3247], A_88[#i#3246, #i#3247]))))))))), #i#3245, #i#3246, #i#3247, #i#3248)
+A_42[] = #A#3288[]
+return A_42
+
+
+==== after loop ordering ====
+fuse(#i#3248):
+    fuse(#i#3245):
+        fuse(#i#3246):
+            fuse(#i#3247):
+                #A#3288[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_85[#i#3248], A_86[#i#3245], A_87[#i#3246], A_85[#i#3247], A_88[#i#3248, #i#3245], A_88[#i#3248, #i#3246], A_88[#i#3248, #i#3247], A_88[#i#3245, #i#3246], A_88[#i#3245, #i#3247], A_88[#i#3246, #i#3247]), #i#3245, #i#3246, #i#3247, #i#3248)
+return #A#3288
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#3246):
+    A_87_copy[#i#3246] = A_87[#i#3246]
+fuse(#i#3245):
+    A_86_copy[#i#3245] = A_86[#i#3245]
+fuse(#i#3248):
+    A_85_copy[#i#3248] = A_85[#i#3248]
+fuse(#i#3248):
+    fuse(#i#3245):
+        fuse(#i#3246):
+            fuse(#i#3247):
+                #A#3288[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_85_copy[#i#3248], A_86_copy[#i#3245], A_87_copy[#i#3246], A_85_copy[#i#3247], A_88[#i#3248, #i#3245], A_88[#i#3248, #i#3246], A_88[#i#3248, #i#3247], A_88[#i#3245, #i#3246], A_88[#i#3245, #i#3247], A_88[#i#3246, #i#3247]), #i#3245, #i#3246, #i#3247, #i#3248)
+return #A#3288
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#3246):
+    A_87_copy[#i#3246] = A_87[walk(#i#3246)]
+fuse(#i#3245):
+    A_86_copy[#i#3245] = A_86[walk(#i#3245)]
+fuse(#i#3248):
+    A_85_copy[#i#3248] = A_85[walk(#i#3248)]
+fuse(#i#3248):
+    fuse(#i#3245):
+        fuse(#i#3246):
+            fuse(#i#3247):
+                #A#3288[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_85_copy[walk(#i#3248)], A_86_copy[follow(#i#3245)], A_87_copy[follow(#i#3246)], A_85_copy[follow(#i#3247)], A_88[follow(#i#3248), walk(#i#3245)], A_88[follow(#i#3248), walk(#i#3246)], A_88[follow(#i#3248), walk(#i#3247)], A_88[follow(#i#3245), walk(#i#3246)], A_88[follow(#i#3245), walk(#i#3247)], A_88[follow(#i#3246), walk(#i#3247)]), #i#3245, #i#3246, #i#3247, #i#3248)
+return #A#3288
+
+
+formats:
+  A_85             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_86             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_87             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_88             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_87_copy        FiberTensorFType(SparseByteMapLevelFType(ElementLevelFType(fv=0.0)))
+  A_86_copy        FiberTensorFType(SparseByteMapLevelFType(ElementLevelFType(fv=0.0)))
+  A_85_copy        FiberTensorFType(SparseByteMapLevelFType(ElementLevelFType(fv=0.0)))
+  #A#3288          FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         11676.0
+  first_s        6.020826902240515
+  plan_total_s   4.900499194860458
+  stats_s        0.10252401791512966
+  logic_s        0.009558815509080887
+  loop_s         0.21590622514486313
+  workspace_s    2.5480973161756992
+  lower_s        1.5132899638265371
+  exec_median_s  0.008300801739096642
+  exec_samples   0.00902893;0.0083008;0.00791916

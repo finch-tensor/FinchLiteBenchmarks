@@ -1,0 +1,81 @@
+# dblp dense_4/query_dense_4_62
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes-loop-model @ 20930e068d (/home/kdeeds/finch-tensor/.claude/worktrees/loop-model)
+
+query:        S[] += V7[v_0] * V7[v_1] * V9[v_2] * V10[v_3] * E0[v_0,v_1] * E0[v_0,v_2] * E0[v_0,v_3] * E0[v_1,v_2] * E0[v_1,v_3] * E0[v_2,v_3]
+einsum:       a,b,c,d,ab,ac,ad,bc,bd,cd->
+ground truth: 13336
+vertices:     317080
+operands:
+  E0     2-d  nnz 2099732
+  V10    1-d  nnz 21025
+  V7     1-d  nnz 20906
+  V9     1-d  nnz 21207
+
+==== after logic optimization (loop orderer input) ====
+#A#2091[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_85[#i#2049], MapJoin(mul, A_85[#i#2051], MapJoin(mul, A_86[#i#2050], MapJoin(mul, A_87[#i#2048], MapJoin(mul, A_88[#i#2049, #i#2051], MapJoin(mul, A_88[#i#2049, #i#2050], MapJoin(mul, A_88[#i#2049, #i#2048], MapJoin(mul, A_88[#i#2051, #i#2050], MapJoin(mul, A_88[#i#2051, #i#2048], A_88[#i#2050, #i#2048]))))))))), #i#2048, #i#2049, #i#2050, #i#2051)
+A_42[] = #A#2091[]
+return A_42
+
+
+==== after loop ordering ====
+fuse(#i#2049):
+    fuse(#i#2051):
+        fuse(#i#2050):
+            fuse(#i#2048):
+                #A#2091[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_85[#i#2049], A_85[#i#2051], A_86[#i#2050], A_87[#i#2048], A_88[#i#2049, #i#2051], A_88[#i#2049, #i#2050], A_88[#i#2049, #i#2048], A_88[#i#2051, #i#2050], A_88[#i#2051, #i#2048], A_88[#i#2050, #i#2048]), #i#2048, #i#2049, #i#2050, #i#2051)
+return #A#2091
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#2048):
+    A_87_copy[#i#2048] = A_87[#i#2048]
+fuse(#i#2050):
+    A_86_copy[#i#2050] = A_86[#i#2050]
+fuse(#i#2049):
+    A_85_copy[#i#2049] = A_85[#i#2049]
+fuse(#i#2049):
+    fuse(#i#2051):
+        fuse(#i#2050):
+            fuse(#i#2048):
+                #A#2091[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_85_copy[#i#2049], A_85_copy[#i#2051], A_86_copy[#i#2050], A_87_copy[#i#2048], A_88[#i#2049, #i#2051], A_88[#i#2049, #i#2050], A_88[#i#2049, #i#2048], A_88[#i#2051, #i#2050], A_88[#i#2051, #i#2048], A_88[#i#2050, #i#2048]), #i#2048, #i#2049, #i#2050, #i#2051)
+return #A#2091
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#2048):
+    A_87_copy[#i#2048] = A_87[walk(#i#2048)]
+fuse(#i#2050):
+    A_86_copy[#i#2050] = A_86[walk(#i#2050)]
+fuse(#i#2049):
+    A_85_copy[#i#2049] = A_85[walk(#i#2049)]
+fuse(#i#2049):
+    fuse(#i#2051):
+        fuse(#i#2050):
+            fuse(#i#2048):
+                #A#2091[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_85_copy[walk(#i#2049)], A_85_copy[follow(#i#2051)], A_86_copy[follow(#i#2050)], A_87_copy[follow(#i#2048)], A_88[follow(#i#2049), walk(#i#2051)], A_88[follow(#i#2049), walk(#i#2050)], A_88[follow(#i#2049), walk(#i#2048)], A_88[follow(#i#2051), walk(#i#2050)], A_88[follow(#i#2051), walk(#i#2048)], A_88[follow(#i#2050), walk(#i#2048)]), #i#2048, #i#2049, #i#2050, #i#2051)
+return #A#2091
+
+
+formats:
+  A_85             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_86             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_87             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_88             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_87_copy        FiberTensorFType(SparseByteMapLevelFType(ElementLevelFType(fv=0.0)))
+  A_86_copy        FiberTensorFType(SparseByteMapLevelFType(ElementLevelFType(fv=0.0)))
+  A_85_copy        FiberTensorFType(SparseByteMapLevelFType(ElementLevelFType(fv=0.0)))
+  #A#2091          FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         13336.0
+  first_s        7.557909978553653
+  plan_total_s   3.013200791552663
+  stats_s        0.057704804465174675
+  logic_s        0.006342830136418343
+  loop_s         0.08917294070124626
+  workspace_s    0.8511504959315062
+  lower_s        1.5093286540359259
+  exec_median_s  0.007935447618365288
+  exec_samples   0.0106698;0.00793545;0.00761753

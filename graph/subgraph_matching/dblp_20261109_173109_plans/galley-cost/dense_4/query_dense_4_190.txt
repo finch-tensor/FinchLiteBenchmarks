@@ -1,0 +1,86 @@
+# dblp dense_4/query_dense_4_190
+# config: galley-cost (galley-bfs/bfs/cost/dc/ws)
+# finch-tensor kbd/subgraph-fixes-loop-model @ 1def9d8238+dirty (/home/kdeeds/finch-tensor/.claude/worktrees/loop-model)
+
+query:        S[] += V5[v_0] * V13[v_1] * V6[v_2] * V8[v_3] * E0[v_0,v_1] * E0[v_1,v_2] * E0[v_1,v_3] * E0[v_2,v_3]
+einsum:       a,b,c,d,ab,bc,bd,cd->
+ground truth: 8693
+vertices:     317080
+operands:
+  E0     2-d  nnz 2099732
+  V13    1-d  nnz 21474
+  V5     1-d  nnz 21036
+  V6     1-d  nnz 20941
+  V8     1-d  nnz 21434
+
+==== after logic optimization (loop orderer input) ====
+#A#3255[#i#3199] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_70[#i#3199], MapJoin(mul, A_71[#i#3197], MapJoin(mul, A_72[#i#3198], MapJoin(mul, A_73[#i#3199, #i#3197], MapJoin(mul, A_73[#i#3199, #i#3198], A_73[#i#3197, #i#3198]))))), #i#3197, #i#3198)
+#A#3256[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_69[#i#3200], MapJoin(mul, #A#3255[#i#3199], A_73[#i#3200, #i#3199])), #i#3199, #i#3200)
+A_34[] = #A#3256[]
+return A_34
+
+
+==== after loop ordering ====
+fuse(#i#3199):
+    fuse(#i#3197):
+        fuse(#i#3198):
+            #A#3255[#i#3199] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_70[#i#3199], A_71[#i#3197], A_72[#i#3198], A_73[#i#3199, #i#3197], A_73[#i#3199, #i#3198], A_73[#i#3197, #i#3198]), #i#3197, #i#3198)
+fuse(#i#3200):
+    fuse(#i#3199):
+        #A#3256[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_69[#i#3200], #A#3255[#i#3199], A_73[#i#3200, #i#3199]), #i#3199, #i#3200)
+return #A#3256
+
+
+==== after workspacer (formatter input) ====
+fuse(#i#3198):
+    A_72_copy[#i#3198] = A_72[#i#3198]
+fuse(#i#3197):
+    A_71_copy[#i#3197] = A_71[#i#3197]
+fuse(#i#3199):
+    fuse(#i#3197):
+        fuse(#i#3198):
+            #A#3255[#i#3199] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_70[#i#3199], A_71_copy[#i#3197], A_72_copy[#i#3198], A_73[#i#3199, #i#3197], A_73[#i#3199, #i#3198], A_73[#i#3197, #i#3198]), #i#3197, #i#3198)
+fuse(#i#3200):
+    fuse(#i#3199):
+        #A#3256[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_69[#i#3200], #A#3255[#i#3199], A_73[#i#3200, #i#3199]), #i#3199, #i#3200)
+return #A#3256
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(#i#3198):
+    A_72_copy[#i#3198] = A_72[walk(#i#3198)]
+fuse(#i#3197):
+    A_71_copy[#i#3197] = A_71[walk(#i#3197)]
+fuse(#i#3199):
+    fuse(#i#3197):
+        fuse(#i#3198):
+            #A#3255[#i#3199] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_70[walk(#i#3199)], A_71_copy[follow(#i#3197)], A_72_copy[follow(#i#3198)], A_73[follow(#i#3199), walk(#i#3197)], A_73[follow(#i#3199), walk(#i#3198)], A_73[follow(#i#3197), walk(#i#3198)]), #i#3197, #i#3198)
+fuse(#i#3200):
+    fuse(#i#3199):
+        #A#3256[] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_69[walk(#i#3200)], #A#3255[follow(#i#3199)], A_73[follow(#i#3200), walk(#i#3199)]), #i#3199, #i#3200)
+return #A#3256
+
+
+formats:
+  A_69             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_70             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_71             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_72             FiberTensorFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))
+  A_73             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_72_copy        FiberTensorFType(DenseLevelFType(ElementLevelFType(fv=0.0)))
+  A_71_copy        FiberTensorFType(DenseLevelFType(ElementLevelFType(fv=0.0)))
+  #A#3255          FiberTensorFType(DenseLevelFType(ElementLevelFType(fv=0.0)))
+  #A#3256          FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         8693.0
+  first_s        3.819859007373452
+  plan_total_s   1.65138541162014
+  stats_s        0.09578118100762367
+  logic_s        0.007686512544751167
+  loop_s         0.018505031242966652
+  workspace_s    0.5111986938863993
+  lower_s        0.7906538788229227
+  exec_median_s  0.03260788135230541
+  exec_samples   0.0327737;0.0324958;0.0326079

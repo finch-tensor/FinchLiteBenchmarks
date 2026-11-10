@@ -7,7 +7,8 @@ from these choices:
 * logic: ``default`` (DefaultLogicFactorizer) or ``galley-{greedy,bfs,dfs}``
 * loop: ``default``, ``greedy``, ``bfs`` or ``dfs`` loop orderer
 * formatter: ``fd`` (FDFormatter), ``galley`` (GalleyFormatter with cost-based
-  protocols) or ``dense`` (DefaultLogicFormatter)
+  protocols), ``cost`` (CostFormatter with cost-based protocols) or ``dense``
+  (DefaultLogicFormatter)
 * stats: ``dc`` (memoised degree constraints), ``lp`` (memoised LpBound
   statistics), ``sampling`` (memoised sampling statistics, randomly seeded),
   ``fd`` or ``uniform``
@@ -45,6 +46,7 @@ from finch.autoschedule.formatter import (
     FDFormatter,
     GalleyFormatter,
 )
+from finch.autoschedule.formatter.smart_formatter import CostFormatter
 from finch.autoschedule.loop_orderer.loop_order_bnb import (
     BFSLoopOrderer,
     DFSLoopOrderer,
@@ -53,6 +55,11 @@ from finch.autoschedule.loop_orderer.loop_order_greedy import GreedyLoopOrderer
 from finch.autoschedule.loop_orderer.loop_ordering import DefaultLoopOrderer
 from finch.autoschedule.normalize import LogicNormalizer
 from finch.autoschedule.protocolizer import CostProtocolizer
+
+try:  # wma/dropfill: drop the fills of aggregates over dense loops
+    from finch.autoschedule.drop_fills import LogicFillDropper
+except ImportError:  # finch-tensor without drop_fills
+    LogicFillDropper = None
 from finch.autoschedule.workspacer import LogicWorkspacer
 
 try:  # finch-tensor kbd/subgraph-fixes: price workspaces with Galley's formats
@@ -77,7 +84,7 @@ LOOP_ORDERERS = {
     "bfs": BFSLoopOrderer,
     "dfs": DFSLoopOrderer,
 }
-FORMATTERS = ("fd", "galley", "dense")
+FORMATTERS = ("fd", "galley", "cost", "dense")
 STATS = {
     "dc": lambda: MemoStatsFactory(DCStatsFactory()),
     # LpBound: degree-sequence norms p in (0, 1, 2, 3, 4, 5, inf), LP-flow bound
@@ -117,6 +124,9 @@ class SchedulerConfig:
 PRESETS = {
     "default": SchedulerConfig("default", "default", "fd", "fd"),
     "galley": SchedulerConfig("galley-bfs", "bfs", "galley", "dc", workspace=True),
+    # galley with formats searched under the protocol cost model, as the
+    # workspacer prices them, instead of chosen by Galley's rules
+    "galley-cost": SchedulerConfig("galley-bfs", "bfs", "cost", "dc", workspace=True),
     # galley with LpBound statistics instead of degree constraints
     "galley-lp": SchedulerConfig("galley-bfs", "bfs", "galley", "lp", workspace=True),
     # galley with sampling statistics instead of degree constraints
@@ -252,8 +262,15 @@ def build_scheduler(config: SchedulerConfig, cache: bool = True, on_program=None
     lowerer = tap(CompilerFormLowerer(LogicCompiler(FinchJLCompiler())), "compiler")
     if config.formatter == "fd":
         formatter = FDFormatter(lowerer)
-    elif config.formatter == "galley":
-        formatter = GalleyFormatter(CostProtocolizer(lowerer))
+    elif config.formatter in ("galley", "cost"):
+        protocolizer = CostProtocolizer(lowerer)
+        if LogicFillDropper is not None:
+            # As COMPILE_JULIA_GALLEY: drop fills between formats and protocols.
+            protocolizer = LogicFillDropper(protocolizer)
+        if config.formatter == "galley":
+            formatter = GalleyFormatter(protocolizer)
+        else:
+            formatter = CostFormatter(protocolizer)
     else:
         formatter = DefaultLogicFormatter(lowerer)
     formatter = _TimedStage(formatter, timer, "lower")

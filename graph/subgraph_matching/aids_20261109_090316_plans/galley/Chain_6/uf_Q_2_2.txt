@@ -1,0 +1,99 @@
+# aids Chain_6/uf_Q_2_2
+# config: galley (galley-bfs/bfs/galley/dc/ws)
+# finch-tensor kbd/subgraph-fixes-loop-model @ 9d02fddcbb (/home/kdeeds/finch-tensor/.claude/worktrees/loop-model)
+
+query:        S[] += E0[v_0,v_1] * E1[v_2,v_1] * E0[v_3,v_2] * E0[v_4,v_3] * E2[v_5,v_4] * E0[v_6,v_5]
+einsum:       ab,cb,dc,ed,fe,gf->
+ground truth: 616
+vertices:     254156
+operands:
+  E0     2-d  nnz 269960
+  E1     2-d  nnz 48010
+  E2     2-d  nnz 2656
+
+==== after logic optimization (loop orderer input) ====
+#A#27214[#i#27064] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_53[#i#27065, #i#27062], A_54[#i#27064, #i#27062]), #i#27062, #i#27065)
+#A#27215[#i#27066] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_55[#i#27063, #i#27066], A_53[#i#27067, #i#27063]), #i#27063, #i#27067)
+#A#27216[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#27214[#i#27064], MapJoin(mul, A_53[#i#27068, #i#27064], MapJoin(mul, A_53[#i#27066, #i#27068], #A#27215[#i#27066]))), #i#27064, #i#27066, #i#27068)
+A_26[] = #A#27216[]
+return A_26
+
+
+==== after loop ordering ====
+fuse(i_0):
+    fuse(i_1):
+        A_61[i_1, i_0] = A_53[i_0, i_1]
+fuse(#i#27064):
+    fuse(#i#27062):
+        fuse(#i#27065):
+            #A#27214[#i#27064] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[#i#27062, #i#27065], A_54[#i#27064, #i#27062]), #i#27062, #i#27065)
+fuse(#i#27063):
+    fuse(#i#27066):
+        fuse(#i#27067):
+            #A#27215[#i#27066] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_55[#i#27063, #i#27066], A_61[#i#27063, #i#27067]), #i#27063, #i#27067)
+fuse(#i#27066):
+    fuse(#i#27068):
+        fuse(#i#27064):
+            #A#27216[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#27214[#i#27064], A_53[#i#27068, #i#27064], A_53[#i#27066, #i#27068], #A#27215[#i#27066]), #i#27064, #i#27066, #i#27068)
+return #A#27216
+
+
+==== after workspacer (formatter input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_61[i_1, i_0] = A_53[i_0, i_1]
+fuse(#i#27064):
+    fuse(#i#27062):
+        fuse(#i#27065):
+            #A#27214[#i#27064] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[#i#27062, #i#27065], A_54[#i#27064, #i#27062]), #i#27062, #i#27065)
+fuse(#i#27063):
+    fuse(#i#27066):
+        fuse(#i#27067):
+            #A#27215[#i#27066] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_55[#i#27063, #i#27066], A_61[#i#27063, #i#27067]), #i#27063, #i#27067)
+fuse(#i#27066):
+    fuse(#i#27068):
+        fuse(#i#27064):
+            #A#27216[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#27214[#i#27064], A_53[#i#27068, #i#27064], A_53[#i#27066, #i#27068], #A#27215[#i#27066]), #i#27064, #i#27066, #i#27068)
+return #A#27216
+
+
+==== after formatting + protocols (compiler input) ====
+fuse(i_0):
+    fuse(i_1):
+        A_61[i_1, i_0] = A_53[follow(i_0), walk(i_1)]
+fuse(#i#27064):
+    fuse(#i#27062):
+        fuse(#i#27065):
+            #A#27214[#i#27064] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_61[follow(#i#27062), walk(#i#27065)], A_54[follow(#i#27064), walk(#i#27062)]), #i#27062, #i#27065)
+fuse(#i#27063):
+    fuse(#i#27066):
+        fuse(#i#27067):
+            #A#27215[#i#27066] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_55[follow(#i#27063), walk(#i#27066)], A_61[follow(#i#27063), walk(#i#27067)]), #i#27063, #i#27067)
+fuse(#i#27066):
+    fuse(#i#27068):
+        fuse(#i#27064):
+            #A#27216[] = Aggregate(add, np.float64(0.0), MapJoin(mul, #A#27214[follow(#i#27064)], A_53[follow(#i#27068), walk(#i#27064)], A_53[follow(#i#27066), walk(#i#27068)], #A#27215[walk(#i#27066)]), #i#27064, #i#27066, #i#27068)
+return #A#27216
+
+
+formats:
+  A_53             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_54             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_55             FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_61             FiberTensorFType(DenseLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+  #A#27214         FiberTensorFType(SparseByteMapLevelFType(ElementLevelFType(fv=0.0)))
+  #A#27215         FiberTensorFType(SparseHashLevelFType(ElementLevelFType(fv=0.0)))
+  #A#27216         FiberTensorFType(ElementLevelFType(fv=0.0))
+
+==== measured ====
+  status         ok
+  result         616.0
+  first_s        2.1741102915257215
+  plan_total_s   1.7127213925123215
+  stats_s        0.019552387297153473
+  logic_s        0.014352520927786827
+  loop_s         0.03254579193890095
+  workspace_s    0.08981315419077873
+  lower_s        0.782538553699851
+  exec_median_s  0.0141228549182415
+  exec_samples   0.0147539;0.0141229;0.0141158
