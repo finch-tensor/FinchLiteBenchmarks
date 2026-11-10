@@ -1,6 +1,6 @@
 """Compare a subgraph-matching run against earlier runs, by query family.
 
-    pixi run python -m finchtensorbench.benchmarks.compare_subgraph_runs \
+    pixi run python -m finchtensorbench.benchmarks.subgraph.compare_subgraph_runs \
         [NEW.csv] --base OLD.csv [--base OTHER.csv ...]
 
 NEW defaults to the newest ``<dataset>_<stamp>.csv`` of ``--dataset`` in

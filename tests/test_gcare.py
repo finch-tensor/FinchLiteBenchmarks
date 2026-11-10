@@ -110,7 +110,7 @@ def test_sgm_graph_is_undirected_and_queries_label_every_vertex(tmp_path):
 def test_counts_finch(toy, config):
     finch = pytest.importorskip("finch")
     from finchtensorbench.benchmarks.autoschedule import build_scheduler, parse_config
-    from finchtensorbench.benchmarks.subgraph_matching import (
+    from finchtensorbench.benchmarks.subgraph.subgraph_matching import (
         GraphTensors,
         query_program,
     )

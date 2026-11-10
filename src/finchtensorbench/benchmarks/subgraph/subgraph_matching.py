@@ -20,7 +20,7 @@ timeout and a new worker continues with the remaining queries.
 
 Run with::
 
-    pixi run python -m finchtensorbench.benchmarks.subgraph_matching \
+    pixi run python -m finchtensorbench.benchmarks.subgraph.subgraph_matching \
         --dataset human --configs default galley
 """
 
@@ -54,8 +54,8 @@ from finchtensorbench.benchmarks.autoschedule import (
     parse_config,
 )
 
-RESULTS_DIR = Path(__file__).resolve().parents[3] / "graph" / "subgraph_matching"
-RUNNER_MODULE = "finchtensorbench.benchmarks.subgraph_matching"
+RESULTS_DIR = Path(__file__).resolve().parents[4] / "graph" / "subgraph_matching"
+RUNNER_MODULE = "finchtensorbench.benchmarks.subgraph.subgraph_matching"
 
 FIELDS = (
     "dataset",
@@ -514,7 +514,7 @@ class WorkerSlot:
         if args.plan_dir:
             command += ["--plan-dir", str(args.plan_dir)]
         env = os.environ.copy()
-        src = str(Path(__file__).resolve().parents[2])
+        src = str(Path(__file__).resolve().parents[3])
         env["PYTHONPATH"] = os.pathsep.join(p for p in (src, env.get("PYTHONPATH")) if p)
         for var in ("JULIA_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                     "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):  # fmt: skip

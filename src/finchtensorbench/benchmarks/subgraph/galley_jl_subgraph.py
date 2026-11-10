@@ -2,7 +2,7 @@
 
 Galley.jl is run from a local checkout with its own experiment loaders, so the
 queries, data and true counts are the ones its paper used.  The timing follows
-:mod:`finchtensorbench.benchmarks.subgraph_matching`, so the two CSVs line up:
+:mod:`finchtensorbench.benchmarks.subgraph.subgraph_matching`, so the two CSVs line up:
 
 * ``first``: one ``galley()`` call, compiling the query's kernels;
 * ``exec``/``plan``: ``--runs`` more calls; ``exec`` is Galley.jl's execution
@@ -17,7 +17,7 @@ worker continues with the next query.
 
 Run with::
 
-    pixi run python -m finchtensorbench.benchmarks.galley_jl_subgraph --dataset aids
+    pixi run python -m finchtensorbench.benchmarks.subgraph.galley_jl_subgraph --dataset aids
 """
 
 from __future__ import annotations

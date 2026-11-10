@@ -1,6 +1,6 @@
 """Box-and-whisker plots of subgraph-matching results CSVs.
 
-    pixi run python -m finchtensorbench.benchmarks.plot_subgraph_matching \
+    pixi run python -m finchtensorbench.benchmarks.subgraph.plot_subgraph_matching \
         graph/subgraph_matching/human_<stamp>.csv [more CSVs ...] [--out PNG]
 
 One panel per runtime (cached-plan execution, fresh plan + execution, first
