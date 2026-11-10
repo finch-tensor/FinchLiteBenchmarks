@@ -10,7 +10,8 @@ queries, data and true counts are the ones its paper used.  The timing follows
   no plan cache, so each call re-plans; its data statistics are built once at
   load and are not part of either time.
 
-A query exceeding ``--timeout`` seconds, or a worker above
+``--jobs`` workers, each pinned to one of ``--cpus``, take the queries in
+blocks of ``--max-queries-per-worker``.  A query exceeding ``--timeout`` seconds, or a worker above
 ``--memory-limit-gb`` of resident memory, is killed and recorded; a fresh
 worker continues with the next query.
 
@@ -41,6 +42,10 @@ WORKLOADS = {
     "human": "human",
     "yeast": "yeast_lite",
     "dblp": "dblp_lite",
+    # dense_8 and sparse_16, copied into Galley.jl's Subgraph_Queries/<graph>
+    # (see gcare.SGM_DATASETS["<graph>_ext"])
+    "dblp_ext": "dblp",
+    "youtube_ext": "youtube",
     "youtube": "youtube_lite",
 }
 CONFIG = "galley.jl"
@@ -55,7 +60,7 @@ WORKER = Path(__file__).with_name("galley_jl_subgraph.jl")
 def query_name(path: str) -> tuple[str, str]:
     """Galley.jl query path -> (our query name, family)."""
     p = Path(path)
-    if p.parent.name.endswith("-lite"):
+    if p.parent.name.endswith("-lite") or p.parent.name in ("dblp", "youtube"):
         family = re.fullmatch(r"query_(.+)_\d+", p.stem).group(1)
         return f"{family}/{p.stem}", family
     return f"{p.parent.name}/{p.stem}", p.parent.name
@@ -90,9 +95,9 @@ def rss_gb(pid: int) -> float:
 class Worker:
     """One Julia process serving queries ``first..last``."""
 
-    def __init__(self, args, first: int, last: int):
+    def __init__(self, args, cpu: int, first: int, last: int):
         cmd = [
-            "taskset", "-c", str(args.cpu), *args.julia.split(),
+            "taskset", "-c", str(cpu), *args.julia.split(),
             f"--project={args.galley_root}", "--startup-file=no",
             str(WORKER), WORKLOADS[args.dataset], str(first), str(last), str(args.runs),
         ]
@@ -119,14 +124,14 @@ class Worker:
         self.log.close()
 
 
-def record(args, path, status, worker_query, *, expected="", count="", first="",
+def record(args, cpu, path, status, worker_query, *, expected="", count="", first="",
            opt=(), exec_=(), error=""):
     name, family = query_name(path)
     expected = expected or true_count(args, path)
     row = dict.fromkeys(FIELDS, "")
     row.update(dataset=args.dataset, config=CONFIG, query=name, family=family,
                status=status, ground_truth=expected, result=count, error=error,
-               cpu=args.cpu, worker_query=worker_query)
+               cpu=cpu, worker_query=worker_query)
     if status == "ok":
         row["correct"] = "" if expected == "" else str(int(count) == int(expected))
         if expected == "":
@@ -154,7 +159,9 @@ def main(argv=None):
                         help="seconds a worker may take to load the workload")
     parser.add_argument("--max-queries-per-worker", type=int, default=50)
     parser.add_argument("--memory-limit-gb", type=float, default=16.0)
-    parser.add_argument("--cpu", type=int, default=0)
+    parser.add_argument("--jobs", type=int, default=1, help="Julia workers in parallel")
+    parser.add_argument("--cpus", type=int, nargs="+",
+                        help="CPUs to pin workers to, one per job (default: 0..jobs-1)")
     parser.add_argument("--limit", type=int, help="only the first N queries")
     parser.add_argument("--out-dir", type=Path, default=Path("graph/subgraph_matching"))
     args = parser.parse_args(argv)
@@ -163,82 +170,118 @@ def main(argv=None):
     out = args.out_dir / f"{args.dataset}_galleyjl_{stamp}.csv"
     args.log_dir = args.out_dir / f"{args.dataset}_galleyjl_{stamp}_logs"
     args.log_dir.mkdir(parents=True, exist_ok=True)
+    cpus = args.cpus or list(range(args.jobs))
+    if len(cpus) < args.jobs:
+        parser.error("--cpus needs one CPU per job")
+    cpus = cpus[:args.jobs]
     rows = []
-    total = None
-    next_q = 1
+    lock = threading.Lock()
+    state = {"total": None, "next": 1}
     with out.open("w", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=FIELDS)
         writer.writeheader()
 
+        def secs(row, key):
+            return f"{row[key]:.4g}s" if row[key] != "" else "-"
+
         def emit(row):
-            rows.append(row)
-            writer.writerow(row)
-            file.flush()
-            def secs(key):
-                return f"{row[key]:.4g}s" if row[key] != "" else "-"
+            with lock:
+                rows.append(row)
+                writer.writerow(row)
+                file.flush()
+                print(f"  {row['status']:<9} {row['query']} exec {secs(row, 'exec_median_s')}"
+                      f"  plan {secs(row, 'plan_total_s')}  first {secs(row, 'first_s')}"
+                      f"  count {row['result'] or '-'} (gt {row['ground_truth'] or None})"
+                      + (f"  {row['error'][:200]}" if row["error"] else ""), flush=True)
 
-            print(f"  {row['status']:<9} {row['query']} exec {secs('exec_median_s')}"
-                  f"  plan {secs('plan_total_s')}  first {secs('first_s')}"
-                  f"  count {row['result'] or '-'} (gt {row['ground_truth'] or None})"
-                  + (f"  {row['error'][:200]}" if row["error"] else ""), flush=True)
-
-        while total is None or next_q <= total:
-            last = next_q + args.max_queries_per_worker - 1
-            if args.limit:
-                last = min(last, args.limit)
-            worker = Worker(args, next_q, last)
-            deadline = time.monotonic() + args.load_timeout
-            current = None  # (index, path, limit)
-            served = 0
-            while True:
-                try:
-                    msg = worker.lines.get(timeout=0.5)
-                except queue.Empty:
-                    msg = ()
-                now = time.monotonic()
-                if msg is None or (msg == () and worker.process.poll() is not None
-                                   and worker.lines.empty()):
-                    if current is None:
-                        if total is None or next_q <= min(total, last):
-                            worker.stop()
-                            raise RuntimeError(
-                                f"worker exited before a query; see {worker.log.name}")
+        def serve(cpu, next_q, last):
+            """Serve queries next_q..last on fresh workers pinned to ``cpu``."""
+            while next_q <= min(last, state["total"] or last):
+                worker = Worker(args, cpu, next_q, last)
+                deadline = time.monotonic() + args.load_timeout
+                current = None  # (index, path, limit)
+                served = 0
+                while True:
+                    try:
+                        msg = worker.lines.get(timeout=0.5)
+                    except queue.Empty:
+                        msg = ()
+                    now = time.monotonic()
+                    if msg is None or (msg == () and worker.process.poll() is not None
+                                       and worker.lines.empty()):
+                        if current is None:
+                            if next_q <= min(state["total"] or last, last):
+                                worker.stop()
+                                raise RuntimeError(
+                                    f"worker exited before a query; see {worker.log.name}")
+                            break
+                        code = worker.process.wait()
+                        tail = Path(worker.log.name).read_text()[-500:].replace("\n", " ")
+                        status = "oom" if code == -9 or "OutOfMemory" in tail else "crash"
+                        emit(record(args, cpu, current[1], status, served,
+                                    error=f"exit {code}: {tail}"))
+                        next_q = current[0] + 1
                         break
-                    code = worker.process.wait()
-                    tail = Path(worker.log.name).read_text()[-500:].replace("\n", " ")
-                    status = "oom" if code == -9 or "OutOfMemory" in tail else "crash"
-                    emit(record(args, current[1], status, served, error=f"exit {code}: {tail}"))
-                    next_q = current[0] + 1
-                    break
-                if msg and msg[0] == "@@READY":
-                    total = int(msg[1]) if not args.limit else min(int(msg[1]), args.limit)
-                elif msg and msg[0] == "@@BEGIN":
-                    limit = args.timeout * (2 if served == 0 else 1)
-                    current = (int(msg[1]), msg[2], limit)
-                    deadline = now + limit
-                elif msg and msg[0] == "@@RESULT":
-                    _, i, path, status, expected, count, first, opt, exec_, err = msg
-                    floats = lambda s: [float(x) for x in s.split(";") if x]
-                    emit(record(args, path, status, served, expected=expected, count=count,
-                                first=float(first), opt=floats(opt), exec_=floats(exec_),
-                                error=err))
-                    served += 1
-                    next_q = int(i) + 1
-                    current = None
-                    deadline = float("inf")
-                elif msg and msg[0] == "@@DONE":
-                    worker.stop()
-                    break
-                if now > deadline or rss_gb(worker.process.pid) > args.memory_limit_gb:
-                    over = now > deadline
-                    worker.stop()
-                    if current is None:
-                        raise RuntimeError("worker failed to load the workload in time")
-                    emit(record(args, current[1], "timeout" if over else "oom", served,
-                                error=(f"exceeded {current[2]:g}s" if over
-                                       else f"over {args.memory_limit_gb:g} GB")))
-                    next_q = current[0] + 1
-                    break
+                    if msg and msg[0] == "@@READY":
+                        with lock:
+                            n = int(msg[1])
+                            state["total"] = min(n, args.limit) if args.limit else n
+                    elif msg and msg[0] == "@@BEGIN":
+                        limit = args.timeout * (2 if served == 0 else 1)
+                        current = (int(msg[1]), msg[2], limit)
+                        deadline = now + limit
+                    elif msg and msg[0] == "@@RESULT":
+                        _, i, path, status, expected, count, first, opt, exec_, err = msg
+                        floats = lambda s: [float(x) for x in s.split(";") if x]
+                        emit(record(args, cpu, path, status, served, expected=expected,
+                                    count=count, first=float(first), opt=floats(opt),
+                                    exec_=floats(exec_), error=err))
+                        served += 1
+                        next_q = int(i) + 1
+                        current = None
+                        deadline = float("inf")
+                    elif msg and msg[0] == "@@DONE":
+                        worker.stop()
+                        next_q = max(next_q, last + 1)
+                        break
+                    if now > deadline or rss_gb(worker.process.pid) > args.memory_limit_gb:
+                        over = now > deadline
+                        worker.stop()
+                        if current is None:
+                            raise RuntimeError("worker failed to load the workload in time")
+                        emit(record(args, cpu, current[1], "timeout" if over else "oom",
+                                    served, error=(f"exceeded {current[2]:g}s" if over
+                                                   else f"over {args.memory_limit_gb:g} GB")))
+                        next_q = current[0] + 1
+                        break
+
+        def run_jobs(cpu):
+            while True:
+                with lock:
+                    first = state["next"]
+                    if state["total"] is not None and first > state["total"]:
+                        return
+                    state["next"] = first + args.max_queries_per_worker
+                last = first + args.max_queries_per_worker - 1
+                if args.limit:
+                    last = min(last, args.limit)
+                serve(cpu, first, last)
+
+        errors = []
+
+        def run_thread(cpu):
+            try:
+                run_jobs(cpu)
+            except Exception as e:  # noqa: BLE001
+                errors.append(e)
+
+        threads = [threading.Thread(target=run_thread, args=(cpu,)) for cpu in cpus]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        if errors:
+            raise errors[0]
 
     summary(rows)
     print(f"wrote {out}")

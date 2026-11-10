@@ -167,21 +167,48 @@ _GALLEY_DATA = (
     "https://raw.githubusercontent.com/kylebd99/Galley.jl/"
     "e6fad3fcd7f1b1932b2529c89f59854f09a9a79b/Experiments/Data"
 )
+# Galley.jl holds only the lite queries; Sun & Luo's full query sets are taken
+# from a mirror at a pinned commit (its dblp lite queries match Galley.jl's).
+_OGM_DATA = (
+    "https://raw.githubusercontent.com/tcalexwang/openGraphMatching/"
+    "0ca7a6c762ef18a42ab5a021ba76ce16e8c607e4/dataset"
+)
 _LITE_IDS = [i for i in range(1, 201) if i % 10 in (0, 2, 4)]
+_LITE_FAMILIES = ("dense_4", "sparse_8")
+_EXT_FAMILIES = ("dense_8", "sparse_16")
 
-# dataset -> (graph path, its sha256, query directory, query names)
+
+def _lite_names(families):
+    return [f"{kind}/query_{kind}_{i}" for kind in families for i in _LITE_IDS]
+
+
+_SHA256 = {
+    "yeast": "dd0119d77bcd95402da2fa8b2edc769de07c7d71837b2cd5fdeaa38c5b07302f",
+    "dblp": "179ad985ed535a543bd98287f7e98122342789ae11648a830c46212a20de1ea0",
+    "youtube": "473670a4dadb48aaaa973f392ea22cd3a1cf7bb9fb446bdd43795465d04084ea",
+}
+
+# dataset -> (graph, its sha256, query URL directory, query names, truth graph);
+# the graph and true counts come from Galley.jl.  "<graph>_ext" holds the lite
+# ids of two further families, dense_8 and sparse_16.
 SGM_DATASETS = {
     name: (
         f"Subgraph_Data/{name}/{name}.graph",
         sha256,
-        f"{name}-lite",
-        [f"{kind}/query_{kind}_{i}" for kind in ("dense_4", "sparse_8") for i in _LITE_IDS],
+        f"{_GALLEY_DATA}/Subgraph_Queries/{name}-lite",
+        _lite_names(_LITE_FAMILIES),
+        name,
     )
-    for name, sha256 in (
-        ("yeast", "dd0119d77bcd95402da2fa8b2edc769de07c7d71837b2cd5fdeaa38c5b07302f"),
-        ("dblp", "179ad985ed535a543bd98287f7e98122342789ae11648a830c46212a20de1ea0"),
-        ("youtube", "473670a4dadb48aaaa973f392ea22cd3a1cf7bb9fb446bdd43795465d04084ea"),
+    for name, sha256 in _SHA256.items()
+} | {
+    f"{name}_ext": (
+        f"Subgraph_Data/{name}/{name}.graph",
+        _SHA256[name],
+        f"{_OGM_DATA}/{name}/query_graph",
+        _lite_names(_EXT_FAMILIES),
+        name,
     )
+    for name in ("dblp", "youtube")
 }
 
 
@@ -197,7 +224,7 @@ def ensure_sgm_downloaded(dataset: str, root: str | Path | None = None) -> Path:
 
     from filelock import FileLock
 
-    graph_path, sha256, query_dir, names = SGM_DATASETS[dataset]
+    graph_path, sha256, query_url, names, truth_graph = SGM_DATASETS[dataset]
     target = data_dir(root) / "sgm" / dataset
     target.mkdir(parents=True, exist_ok=True)
     marker = target / f".complete-{sha256}"
@@ -205,23 +232,23 @@ def ensure_sgm_downloaded(dataset: str, root: str | Path | None = None) -> Path:
         if marker.exists():
             return target
 
-        def fetch(path: str) -> bytes | None:
+        def fetch(url: str) -> bytes | None:
             try:
-                with urllib.request.urlopen(f"{_GALLEY_DATA}/{path}") as response:
+                with urllib.request.urlopen(url) as response:
                     return response.read()
             except urllib.error.HTTPError as error:
                 if error.code == 404:
                     return None
                 raise
 
-        graph = fetch(graph_path)
+        graph = fetch(f"{_GALLEY_DATA}/{graph_path}")
         if graph is None or hashlib.sha256(graph).hexdigest() != sha256:
             raise RuntimeError(f"bad download of {graph_path}")
         (target / "graph.txt").write_bytes(graph)
         for name in names:
             stem = name.split("/")[1]
-            for kind, folder in (("queries", f"Subgraph_Queries/{query_dir}"),
-                                 ("truth", f"Subgraph_TrueCardinalities/{dataset}")):
+            truth_url = f"{_GALLEY_DATA}/Subgraph_TrueCardinalities/{truth_graph}"
+            for kind, folder in (("queries", query_url), ("truth", truth_url)):
                 data = fetch(f"{folder}/{stem}.graph")
                 if data is None and kind == "queries":
                     raise RuntimeError(f"missing query {name}")
