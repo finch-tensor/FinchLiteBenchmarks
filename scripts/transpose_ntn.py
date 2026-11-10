@@ -23,22 +23,98 @@ import traceback
 import finch as ft
 import finch.finch_notation as ntn
 import numpy as np
-from finch import ffuncs, ftype
-from finch.compile_jl.compiler import FinchJLCompiler
-
-sys.path.insert(0, __file__.rsplit("/", 1)[0])
-from symmetry_ntn import (  # noqa: E402
-    I64,
-    accumulate,
-    call,
-    csr_tensor,
-    extent,
-    function,
-    lit,
-    read,
-    scalar,
-    var,
+from finch import (
+    DenseLevel,
+    ElementLevel,
+    FiberTensor,
+    NumpyBuffer,
+    NumpyBufferFType,
+    SparseListLevel,
+    element,
+    ffuncs,
+    ftype,
 )
+from finch.compile.lower import make_extent
+from finch.compile_jl.compiler import FinchJLCompiler
+from finch.finch_assembly import AssemblyKernelFType
+from finch.tensor import BufferizedNDArray
+
+I64 = np.int64
+
+
+def csr_tensor(rows: np.ndarray, cols: np.ndarray, n: int) -> FiberTensor:
+    """The n x n 0/1 matrix with entries at (rows, cols), as Dense(SparseList)."""
+    key = np.unique(rows.astype(I64) * n + cols.astype(I64))
+    rows, cols = key // n, key % n
+    ptr = np.zeros(n + 1, dtype=np.intp)
+    np.add.at(ptr, rows + 1, 1)
+    np.cumsum(ptr, out=ptr)
+    elem = element(I64(0), ftype(I64), ftype(np.intp), NumpyBufferFType)
+    return FiberTensor(
+        DenseLevel(
+            SparseListLevel(
+                ElementLevel(elem, NumpyBuffer(np.ones(len(cols), dtype=I64))),
+                np.intp(n),
+                NumpyBuffer(ptr),
+                NumpyBuffer(cols.astype(np.intp)),
+            ),
+            np.intp(n),
+        )
+    )
+
+
+def scalar(value=0) -> BufferizedNDArray:
+    return BufferizedNDArray.from_numpy(np.array(value, dtype=I64))
+
+
+def var(name, t):
+    return ntn.Variable(name, t)
+
+
+def lit(x):
+    return ntn.Literal(x)
+
+
+def call(op, *args):
+    return ntn.Call(lit(op), tuple(args))
+
+
+def read(slot, *idxs, protocols=()):
+    return ntn.Unwrap(ntn.Access(slot, ntn.Read(tuple(protocols)), tuple(idxs)))
+
+
+def extent(stop):
+    return call(make_extent, lit(np.intp(0)), stop)
+
+
+def function(name, args, body_stmts, outputs):
+    """A notation function unpacking *args*, running *body_stmts* on their slots,
+    and returning *outputs* (a subset of args)."""
+    slots = {a: ntn.Slot(a.name + "_", a.result_type) for a in args}
+    result = call(ffuncs.make_tuple, *outputs)
+    body = ntn.Block(
+        (
+            *(ntn.Unpack(slots[a], a) for a in args),
+            *body_stmts(slots),
+            *(ntn.Repack(slots[a], a) for a in args),
+            ntn.Return(result),
+        )
+    )
+    kernel_t = AssemblyKernelFType(
+        name, tuple(a.result_type for a in args), result.result_type
+    )
+    return ntn.Function(var(name, kernel_t), tuple(args), body)
+
+
+ADD = ffuncs.add
+
+
+def accumulate(slot, value, *idxs):
+    return ntn.Increment(ntn.Access(slot, ntn.Update(lit(ADD)), tuple(idxs)), value)
+
+
+# ---------------------------------------------------------------------------
+
 
 IDX = ftype(np.intp)
 OVER = ffuncs.overwrite
