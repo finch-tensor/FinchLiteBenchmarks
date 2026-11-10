@@ -107,6 +107,24 @@ STATS = {
     "vp": lambda: MemoStatsFactory(VPStatsFactory()),
     "uniform": UniformStatsFactory,
 }
+
+
+def _symmetric(inner):
+    """Memoised *inner* statistics wrapped to check each input for reverse
+    symmetry, so loop ordering can read it reversed instead of transposing it
+    (finch-tensor kbd/symmetric-stats: SymmetricStatsFactory)."""
+
+    def factory():
+        from finch.autoschedule.tensor_stats.symmetric_stats import (
+            SymmetricStatsFactory,
+        )
+
+        return MemoStatsFactory(SymmetricStatsFactory(inner()))
+
+    return factory
+
+
+STATS |= {"dc+sym": _symmetric(DCStatsFactory), "lp+sym": _symmetric(LPStatsFactory)}
 STAGES = ("stats", "logic", "loop", "workspace", "lower")
 
 
