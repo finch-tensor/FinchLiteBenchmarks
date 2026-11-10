@@ -15,8 +15,16 @@ Each configuration runs in its own worker process.  Per query the worker:
 3. ``exec``: runs it ``--runs`` more times on that scheduler, which now hits
    its plan cache, so only execution is timed.
 
-A query exceeding ``--timeout`` seconds kills the worker; it is recorded as a
-timeout and a new worker continues with the remaining queries.
+Step 1 may take ``--first-timeout`` seconds and steps 2-3 together
+``--timeout`` seconds, for every query alike (no allowance depends on where a
+query falls in a worker's queue).  A query exceeding either kills the worker; it
+is recorded as a timeout and a new worker continues with the remaining queries.
+
+The plan saved for a query is the one steps 2-3 time; ``plan_same`` says
+whether step 1 planned the same (up to names).  Workers run with a fixed
+``PYTHONHASHSEED`` (``--hash-seed``), and the finch-tensor revision is checked
+at every worker start, so a campaign that sees finch change underneath it stops
+instead of mixing revisions (``--allow-revision-change`` to permit it).
 
 Run with::
 
@@ -33,6 +41,7 @@ import math
 import os
 import queue
 import random
+import re
 import resource
 import statistics
 import subprocess
@@ -79,6 +88,9 @@ FIELDS = (
     "plan_file",
     "cpu",
     "worker_query",
+    "plan_same",
+    "hash_seed",
+    "finch_revision",
 )
 
 
@@ -173,6 +185,53 @@ def _run_once(query, tensors, context):
     return float(np.asarray(fl.to_numpy(result)).ravel()[0]), elapsed
 
 
+def counts_match(result: float, ground_truth) -> bool:
+    """Whether *result* (finch's float64 count) is *ground_truth*, to float64
+    precision: counts above 2**53 cannot be represented exactly, so both are
+    rounded to float64 before comparing."""
+    return ground_truth is not None and float(result) == float(ground_truth)
+
+
+_NAME = re.compile(r"#([A-Za-z])#\d+")
+_TABLE = re.compile(r"\bA_\d+(?=\b|_)")
+_TRAILING_FIELDS = re.compile(r"((?:, #[A-Za-z]#\w+)+)\)$", re.MULTILINE)
+
+
+def normalize_plan(text: str) -> str:
+    """*text* with generated names (``#A#123``, ``#i#45``) renumbered in order
+    of appearance and each trailing list of aggregated fields sorted, so two
+    plans compare equal when they differ only in fresh names or set order."""
+    names: dict[str, str] = {}
+
+    def rename(match):
+        kind = match.group(1)
+        if match.group(0) not in names:
+            names[match.group(0)] = f"#{kind}#{sum(n[1] == kind for n in names)}"
+        return names[match.group(0)]
+
+    text = _NAME.sub(rename, text)
+    tables: dict[str, str] = {}
+    text = _TABLE.sub(
+        lambda m: tables.setdefault(m.group(0), f"A_{len(tables)}"), text
+    )
+    text = _TRAILING_FIELDS.sub(
+        lambda m: ", " + ", ".join(sorted(m.group(1)[2:].split(", "))) + ")", text
+    )
+    return "\n".join(" ".join(line.split()) for line in text.splitlines())
+
+
+def stage_text(stage, program, bindings) -> str:
+    """How a plan file shows the program entering *stage*."""
+    from finchtensorbench.benchmarks.autoschedule import PLAN_STAGES
+
+    text = f"\n==== {PLAN_STAGES.get(stage, stage)} ====\n{program}\n"
+    if stage == "compiler":
+        text += "\nformats:\n" + "".join(
+            f"  {str(alias):16} {ftype}\n" for alias, ftype in bindings.items()
+        )
+    return text
+
+
 def plan_path(plan_dir: Path, config_name: str, query_name: str) -> Path:
     """Where the plan of *query_name* under *config_name* is saved."""
     return plan_dir / config_name.replace("/", "+") / f"{query_name}.txt"
@@ -217,9 +276,9 @@ class PlanRecorder:
     """Write a query's plan to a text file as the scheduler produces it.
 
     Each stage is flushed as soon as it is seen, so the plan survives a kernel
-    that times out, runs out of memory or crashes the worker.  Only the first
-    compute is recorded (later fresh plans of the same query are identical
-    up to names).
+    that times out, runs out of memory or crashes the worker.  The first
+    compute is recorded; if the timed one plans differently (beyond names),
+    its plan is appended (see ``measure_query``).
     """
 
     def __init__(self, path: Path, query, config, tensors: "GraphTensors"):
@@ -227,6 +286,7 @@ class PlanRecorder:
 
         self.path = path
         self.recording = True
+        self.texts: list[str] = []
         path.parent.mkdir(parents=True, exist_ok=True)
         graph = tensors.graph
         lines = [
@@ -250,16 +310,18 @@ class PlanRecorder:
             file.write(text)
 
     def on_program(self, stage, program, bindings):
-        from finchtensorbench.benchmarks.autoschedule import PLAN_STAGES
-
         if not self.recording:
             return
-        text = f"\n==== {PLAN_STAGES.get(stage, stage)} ====\n{program}\n"
-        if stage == "compiler":
-            text += "\nformats:\n" + "".join(
-                f"  {str(alias):16} {ftype}\n" for alias, ftype in bindings.items()
-            )
+        text = stage_text(stage, program, bindings)
+        self.texts.append(text)
         self._write(text)
+
+    def append_timed_plan(self, texts: list[str]):
+        """Record the plan steps 2-3 timed, which differs from the first one."""
+        self._write(
+            "\n==== the timed run planned differently; its plan follows ====\n"
+            + "".join(texts)
+        )
 
     def stop(self):
         self.recording = False
@@ -280,7 +342,10 @@ def append_plan_status(path: Path, status: str, error: str):
                        f"  error          {error}\n")  # fmt: skip
 
 
-def measure_query(query, tensors, config, runs, recorder: PlanRecorder | None = None):
+def measure_query(
+    query, tensors, config, runs, recorder: PlanRecorder | None = None,
+    on_cold_done=None,
+):  # fmt: skip
     from finchtensorbench.benchmarks.autoschedule import (
         build_scheduler,
         describe_orders,
@@ -292,9 +357,19 @@ def measure_query(query, tensors, config, runs, recorder: PlanRecorder | None = 
     )
     if recorder:
         recorder.stop()
+    if on_cold_done is not None:
+        on_cold_done()
 
-    context = build_scheduler(config)
+    timed: list[str] = []
+    context = build_scheduler(
+        config, on_program=lambda *stage: timed.append(stage_text(*stage))
+    )
     result, plan_total_s = _run_once(query, tensors, context)
+    plan_same = recorder is None or normalize_plan("".join(recorder.texts)) == (
+        normalize_plan("".join(timed))
+    )
+    if not plan_same:
+        recorder.append_timed_plan(timed)
     stage_times = dict(context.timer.times)
     logic_order = describe_orders(context.captures.get("logic"), loop_order=False)
     loop_order = describe_orders(context.captures.get("loop"), loop_order=True)
@@ -308,7 +383,7 @@ def measure_query(query, tensors, config, runs, recorder: PlanRecorder | None = 
 
     return {
         "result": result,
-        "correct": query.ground_truth is not None and result == query.ground_truth,
+        "correct": counts_match(result, query.ground_truth),
         "first_s": first_s,
         "plan_total_s": plan_total_s,
         **{f"{stage}_s": stage_times[stage] for stage in STAGES},
@@ -318,6 +393,7 @@ def measure_query(query, tensors, config, runs, recorder: PlanRecorder | None = 
         "exec_samples": ";".join(f"{s:.6g}" for s in samples),
         "logic_order": logic_order,
         "loop_order": loop_order,
+        "plan_same": plan_same,
     }
 
 
@@ -378,6 +454,13 @@ def _stdin_lines():
 
 
 def run_worker(args):
+    revision = _finch_revision()
+    expected = os.environ.get("FINCHBENCH_REVISION")
+    if expected and revision != expected:
+        raise RuntimeError(
+            f"finch-tensor changed during the campaign: started with {expected}, "
+            f"this worker imports {revision}"
+        )
     config = parse_config(args.config)
     graph = gcare.load_graph(args.dataset, args.data_dir)
     tensors = GraphTensors(graph)
@@ -396,7 +479,12 @@ def run_worker(args):
                 path = plan_path(args.plan_dir, args.config, query.name)
                 recorder = PlanRecorder(path, query, config, tensors)
             try:
-                record = measure_query(query, tensors, config, args.runs, recorder)
+                record = measure_query(
+                    query, tensors, config, args.runs, recorder,
+                    on_cold_done=lambda name=query.name: _emit(
+                        out, {"event": "cold", "query": name, "time": time.time()}
+                    ),
+                )  # fmt: skip
                 record["status"] = (
                     "ok" if record["correct"]
                     else "wrong" if query.ground_truth is not None
@@ -408,6 +496,8 @@ def run_worker(args):
                 record = {"status": "oom" if oom else "error", "error": message[:2000]}
             if recorder:
                 recorder.append_record(record)
+            record["finch_revision"] = revision
+            record["hash_seed"] = os.environ.get("PYTHONHASHSEED", "")
             _emit(out, {"event": "done", "query": query.name, "record": record})
 
 
@@ -444,6 +534,40 @@ def _memory_limiter(limit_gb):
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 
     return apply
+
+
+def _cgroup_dir() -> Path | None:
+    """This process's cgroup v2 directory, if it has one."""
+    try:
+        for line in Path("/proc/self/cgroup").read_text().splitlines():
+            if line.startswith("0::"):
+                return Path("/sys/fs/cgroup") / line[3:].lstrip("/")
+    except OSError:
+        pass
+    return None
+
+
+def cgroup_memory_max_gb() -> float | None:
+    """The memory cap of the cgroup this run is in (e.g. systemd-run
+    ``-p MemoryMax``), or None if it is unlimited or unknown."""
+    folder = _cgroup_dir()
+    try:
+        value = (folder / "memory.max").read_text().strip() if folder else "max"
+    except OSError:
+        return None
+    return None if value == "max" else int(value) / 1024**3
+
+
+def _cgroup_oom_kills() -> int:
+    folder = _cgroup_dir()
+    try:
+        for line in (folder / "memory.events").read_text().splitlines():
+            key, value = line.split()
+            if key == "oom_kill":
+                return int(value)
+    except (OSError, TypeError, ValueError):
+        pass
+    return 0
 
 
 def _worker_setup(limit_gb, cpu):
@@ -519,6 +643,10 @@ class WorkerSlot:
         for var in ("JULIA_NUM_THREADS", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
                     "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):  # fmt: skip
             env[var] = "1"
+        # Set iteration order (and so plan tie-breaking) is fixed across workers.
+        env["PYTHONHASHSEED"] = str(args.hash_seed)
+        if args.finch_revision:
+            env["FINCHBENCH_REVISION"] = args.finch_revision
         self.log_file = self.log.open("w")
         self.process = subprocess.Popen(
             command,
@@ -564,19 +692,23 @@ class WorkerSlot:
         return record
 
     def _serve(self, query, index) -> dict:
-        # A fresh worker (the first one or a restart) still has to compile
-        # every kernel and planning path its first query touches, so that
-        # query gets extra time; every worker gets the same allowance.
-        limit = self.args.timeout + (self.args.first_query_grace if index == 0 else 0)
+        # Two phases, limited alike for every query: the cold first compute
+        # (--first-timeout, which absorbs compilation wherever the query falls
+        # in a worker's queue) and the timed fresh plan plus cached runs
+        # (--timeout).
         self.process.stdin.write(query.name + "\n")
         self.process.stdin.flush()
         started = None
+        phase, limit = "cold", self.args.first_timeout
         while True:
             for event in self._events():
                 if event["query"] != query.name:
                     continue
                 if event["event"] == "start":
                     started = time.monotonic()
+                elif event["event"] == "cold":
+                    started = time.monotonic()
+                    phase, limit = "timed", self.args.timeout
                 else:
                     self.served += 1
                     return event["record"]
@@ -584,7 +716,11 @@ class WorkerSlot:
                 return self._died(query, started)
             if started and time.monotonic() - started > limit:
                 self._stop()
-                return {"status": "timeout", "error": f"exceeded {limit:g}s"}
+                return {
+                    "status": "timeout",
+                    "error": f"{phase} phase exceeded {limit:g}s",
+                    "timeout_phase": phase,
+                }
             time.sleep(0.2)
 
     def _events_pending(self) -> bool:
@@ -601,6 +737,10 @@ class WorkerSlot:
                 f"{text[-4000:]}"
             )
         tail = text[-500:].replace("\n", " | ")
+        kills = _cgroup_oom_kills()
+        if kills > self.args.cgroup_oom_kills:
+            self.args.cgroup_oom_kills = kills
+            tail = f"[cgroup OOM kill: the whole run's memory cap was hit] {tail}"
         # We did not kill it, so SIGKILL means the kernel OOM killer.
         oom = code == -9 or any(
             s in text for s in ("OutOfMemory", "MemoryError", "out of memory")
@@ -659,7 +799,57 @@ def run_config(args, config_name, queries, writer, csv_file):
     return rows
 
 
-def _print_row(row):
+def run_interleaved(args, config_names, queries, writer, csv_file):
+    """Run every (query, config) pair on ``args.jobs`` pinned CPUs, query by
+    query, so configs are measured at the same time under the same machine
+    load; the config order is rotated from one query to the next.  Each CPU
+    keeps one worker per config (idle ones hold their memory)."""
+    pending: queue.Queue = queue.Queue()
+    for i, query in enumerate(queries):
+        k = i % len(config_names)
+        for name in config_names[k:] + config_names[:k]:
+            pending.put((query, name))
+    rows: list[dict] = []
+    lock = threading.Lock()
+
+    def drain(cpu, folder):
+        slots = {name: WorkerSlot(args, name, cpu, folder) for name in config_names}
+        try:
+            while True:
+                try:
+                    query, name = pending.get_nowait()
+                except queue.Empty:
+                    return
+                record = slots[name].run(query)
+                row = _base_row(args.dataset, name, query, args.plan_dir)
+                row.update(record, cpu=cpu)
+                if args.plan_dir and "result" not in record:
+                    path = plan_path(args.plan_dir, name, query.name)
+                    if record["status"] in ("timeout", "crash") or (
+                        record["status"] == "oom" and "exit" in record.get("error", "")
+                    ):
+                        append_plan_status(path, record["status"], record["error"])
+                with lock:
+                    rows.append(row)
+                    writer.writerow(row)
+                    csv_file.flush()
+                    _print_row(row, name)
+        finally:
+            for slot in slots.values():
+                slot.close()
+
+    cpus = args.cpus[: args.jobs]
+    with (
+        tempfile.TemporaryDirectory(prefix="subgraph-workers-") as folder,
+        ThreadPoolExecutor(len(cpus)) as pool,
+    ):
+        futures = [pool.submit(drain, cpu, Path(folder)) for cpu in cpus]
+        for future in futures:
+            future.result()
+    return rows
+
+
+def _print_row(row, config=None):
     if row["status"] in ("ok", "wrong", "unchecked"):
         detail = (
             f"exec {row['exec_median_s']:.4g}s  plan {row['plan_total_s']:.4g}s  "
@@ -668,7 +858,8 @@ def _print_row(row):
         )
     else:
         detail = row.get("error", "")
-    print(f"  {row['status']:7} {row['query']:22} {detail}", flush=True)
+    where = f"[{config}] " if config else ""
+    print(f"  {row['status']:7} {where}{row['query']:22} {detail}", flush=True)
 
 
 def _geomean(values):
@@ -691,6 +882,23 @@ def print_summary(rows, config_names):
             f"{_geomean([r['exec_median_s'] for r in ok]):11.4g}s  "
             f"{_geomean([r['plan_total_s'] for r in ok]):11.4g}s"
         )
+
+
+def _save_finch_diff(path: Path):
+    """Save finch-tensor's uncommitted changes, if any, next to the CSV."""
+    import finch
+
+    source = Path(finch.__file__ or ".").resolve().parent
+    try:
+        diff = subprocess.run(
+            ["git", "-C", str(source), "diff", "HEAD", "--", "."],
+            capture_output=True, text=True, check=True,
+        ).stdout  # fmt: skip
+    except (subprocess.CalledProcessError, OSError):
+        return
+    if diff:
+        path.write_text(diff)
+        print(f"finch-tensor's uncommitted changes saved to {path}")
 
 
 def main(argv=None):
@@ -717,10 +925,30 @@ def main(argv=None):
         help="restart each worker after this many queries (0 never)",
     )
     parser.add_argument(
-        "--first-query-grace",
+        "--first-timeout",
         type=float,
-        help="extra seconds for the first query of each worker process, which "
-        "compiles its kernels from scratch (default: --timeout, i.e. doubled)",
+        help="seconds for each query's cold first compute, which compiles its "
+        "kernels (default: --timeout); --timeout then limits the timed fresh "
+        "plan and cached runs",
+    )
+    parser.add_argument(
+        "--hash-seed", type=int, default=0, help="PYTHONHASHSEED for every worker"
+    )
+    parser.add_argument(
+        "--interleave",
+        action="store_true",
+        help="measure the configs query by query, at the same time, instead of "
+        "one config after another",
+    )
+    parser.add_argument(
+        "--allow-revision-change",
+        action="store_true",
+        help="don't stop if finch-tensor changes during the campaign",
+    )
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="run even if finch-tensor has uncommitted changes (saved as a diff)",
     )
     parser.add_argument(
         "--memory-limit-gb",
@@ -756,8 +984,17 @@ def main(argv=None):
 
     if args.worker_output:
         return run_worker(args)
-    if args.first_query_grace is None:
-        args.first_query_grace = args.timeout
+    if args.first_timeout is None:
+        args.first_timeout = args.timeout
+    args.cgroup_oom_kills = _cgroup_oom_kills()
+    args.finch_revision = _finch_revision()
+    if "+dirty" in args.finch_revision and not args.allow_dirty:
+        parser.error(
+            f"finch-tensor has uncommitted changes ({args.finch_revision}); commit "
+            "them, run from a frozen checkout, or pass --allow-dirty"
+        )
+    if args.allow_revision_change:
+        args.finch_revision = ""
     if args.cpus is None:
         args.cpus = default_cpus()
     if args.jobs < 1 or args.jobs > len(args.cpus):
@@ -767,11 +1004,18 @@ def main(argv=None):
     # taking down other processes.
     total_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024**3
     budget_gb = args.memory_fraction * total_gb
+    cap_gb = cgroup_memory_max_gb()
+    if cap_gb is not None and cap_gb < budget_gb:
+        # The run's own cap (systemd-run MemoryMax) is tighter: keep the
+        # workers' limits within it, so that a query that needs too much fails
+        # alone (status oom) instead of the cgroup OOM killer picking a victim.
+        budget_gb = 0.95 * cap_gb
     if args.memory_limit_gb and args.jobs * args.memory_limit_gb > budget_gb:
         limit = math.floor(10 * budget_gb / args.jobs) / 10
         print(
             f"note: {args.jobs} workers x {args.memory_limit_gb:g} GB would exceed "
-            f"{args.memory_fraction:.0%} of {total_gb:.0f} GB RAM; limiting each "
+            f"the {budget_gb:.0f} GB budget (min of {args.memory_fraction:.0%} of "
+            f"{total_gb:.0f} GB RAM and this run's memory cap); limiting each "
             f"worker to {limit:g} GB"
         )
         args.memory_limit_gb = limit
@@ -800,13 +1044,19 @@ def main(argv=None):
     args.plan_dir = (
         None if args.no_plans else args.output_dir / f"{args.dataset}_{stamp}_plans"
     )
+    print(f"finch-tensor {args.finch_revision or _finch_revision()}")
+    _save_finch_diff(path.with_suffix(".finch.diff"))
     rows = []
     with path.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=FIELDS, extrasaction="ignore")
         writer.writeheader()
-        for name in config_names:
-            print(f"\n[{name}]", flush=True)
-            rows += run_config(args, name, queries, writer, csv_file)
+        if args.interleave:
+            print(f"\n[interleaved: {', '.join(config_names)}]", flush=True)
+            rows = run_interleaved(args, config_names, queries, writer, csv_file)
+        else:
+            for name in config_names:
+                print(f"\n[{name}]", flush=True)
+                rows += run_config(args, name, queries, writer, csv_file)
     print_summary(rows, config_names)
     print(f"\nwrote {path}")
     if args.plan_dir:

@@ -85,7 +85,7 @@ try:  # value-propagation statistics
 except ImportError:  # finch-tensor without vp_stats
     VPStatsFactory = None
 from finch.compile_jl.compiler import FinchJLCompiler
-from finch.finch_logic import Aggregate, LogicSimplify, Reorder
+from finch.finch_logic import Aggregate, Fuse, LogicSimplify, Reorder
 
 LOGIC_ORDERERS = ("default", "galley-greedy", "galley-bfs", "galley-dfs")
 LOOP_ORDERERS = {
@@ -361,29 +361,37 @@ def _field_names(fields):
     return ",".join(getattr(field, "name", str(field)) for field in fields)
 
 
-def _queries(program):
-    bodies = getattr(program, "bodies", None)
-    if bodies is None:
-        yield program
-        return
-    for body in bodies:
-        if hasattr(body, "bodies"):
-            yield from _queries(body)
-        else:
-            yield body
+def _queries(program, fused=()):
+    """The queries of *program*, each with the fields of the ``Fuse`` loops
+    around it, outermost first."""
+    match program:
+        case None:
+            return
+        case Fuse(idx, body):
+            yield from _queries(body, (*fused, idx))
+        case _ if hasattr(program, "bodies"):
+            for body in program.bodies:
+                yield from _queries(body, fused)
+        case _:
+            yield program, fused
 
 
 def describe_orders(program, loop_order: bool) -> str:
-    """Aggregation indices of each query in *program* (logic) or loop orders."""
+    """The aggregated fields of each query in *program* (logic), or each
+    query's loop order: its enclosing ``Fuse`` loops, then any loops of its
+    own (a ``Reorder`` of the aggregated expression)."""
     orders = []
-    for node in _queries(program) if program is not None else ():
+    for node, fused in _queries(program):
         rhs = getattr(node, "rhs", None)
         if isinstance(rhs, Reorder):
             rhs = rhs.arg
         if not isinstance(rhs, Aggregate):
+            if loop_order and fused:
+                orders.append(_field_names(fused))
             continue
-        if loop_order and isinstance(rhs.arg, Reorder):
-            orders.append(_field_names(rhs.arg.idxs))
-        elif not loop_order:
+        if loop_order:
+            own = rhs.arg.idxs if isinstance(rhs.arg, Reorder) else ()
+            orders.append(_field_names((*fused, *own)))
+        else:
             orders.append(_field_names(rhs.idxs))
     return (" | " if loop_order else " -> ").join(orders) or "-"

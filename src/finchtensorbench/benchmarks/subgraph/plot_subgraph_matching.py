@@ -62,9 +62,23 @@ def _family_key(family):
     return (shape, int(size) if size.isdigit() else 0)
 
 
-def plot(paths, out=None):
+def plot(paths, out=None, paired=False, palette=None):
     rows = [row for path in paths for row in load(path)]
     configs = list(dict.fromkeys(r["config"] for r in rows))
+    series = palette or SERIES
+    dropped = 0
+    if paired:
+        # Only queries every config finished with a correct count, so every box
+        # is over the same queries (a config that fails the hard ones is not
+        # flattered by them being left out of its box only).
+        good = defaultdict(set)
+        for r in rows:
+            if r["status"] in ("ok", "unchecked"):
+                good[r["config"]].add((r["dataset"], r["query"]))
+        common = set.intersection(*good.values()) if good else set()
+        dropped = len({(r["dataset"], r["query"]) for r in rows} - common)
+        rows = [r for r in rows if (r["dataset"], r["query"]) in common
+                or r["status"] not in ("ok", "unchecked")]
     families = sorted({r["family"] for r in rows}, key=_family_key)
     # Many families (e.g. AIDS: Chain_3 ... Tree_12) are grouped by shape.
     by_shape = len(families) > MAX_FAMILY_GROUPS
@@ -78,6 +92,8 @@ def plot(paths, out=None):
     for r in rows:
         if r["status"] not in ("ok", "unchecked"):
             failed[(r["config"], r["status"])] += 1
+            continue
+        if paired and any(m == "" for m in (r.get(k, "") for k, _ in METRICS)):
             continue
         for metric, _ in METRICS:
             for group in (group_of(r), "All"):
@@ -93,7 +109,7 @@ def plot(paths, out=None):
     for ax, (metric, title) in zip(axes, METRICS, strict=True):
         ax.set_facecolor(SURFACE)
         for c, config in enumerate(configs):
-            color = SERIES[c % len(SERIES)]
+            color = series[c % len(series)]
             for g, group in enumerate(groups):
                 values = ok.get((metric, config, group), [])
                 if not values:
@@ -132,8 +148,8 @@ def plot(paths, out=None):
             ax.spines[side].set_color(GRID)
 
     handles = [
-        plt.Rectangle((0, 0), 1, 1, facecolor=SERIES[i % len(SERIES)] + "33",
-                      edgecolor=SERIES[i % len(SERIES)])  # fmt: skip
+        plt.Rectangle((0, 0), 1, 1, facecolor=series[i % len(series)] + "33",
+                      edgecolor=series[i % len(series)])  # fmt: skip
         for i in range(len(configs))
     ]
     fig.legend(handles, configs, loc="upper right", ncol=len(configs), frameon=False,
@@ -142,9 +158,11 @@ def plot(paths, out=None):
     fig.suptitle(f"{' vs '.join(configs)} on {dataset}: runtime per query",
                  x=0.01, ha="left", fontsize=12, color=TEXT)  # fmt: skip
     note = "; ".join(f"{c}: {n} {s}" for (c, s), n in sorted(failed.items()))
+    which = (f"Paired: only queries every system finished correctly ({dropped} "
+             "queries left out). " if paired else "Correct results only. ")
     fig.text(0.01, 0.005,
-             "Correct results only. " + (f"Not plotted - {note}." if note else
-                                         "All queries finished correctly."),
+             which + (f"Failures - {note}." if note else
+                      "All queries finished correctly."),
              fontsize=8, color=TEXT_2)  # fmt: skip
     fig.tight_layout(rect=(0, 0.02, 1, 0.97))
     if out is None:
@@ -158,8 +176,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("csv", type=Path, nargs="+")
     parser.add_argument("--out", type=Path)
+    parser.add_argument(
+        "--paired",
+        action="store_true",
+        help="only plot queries every config finished correctly",
+    )
     args = parser.parse_args(argv)
-    plot(args.csv, args.out)
+    plot(args.csv, args.out, paired=args.paired)
 
 
 if __name__ == "__main__":

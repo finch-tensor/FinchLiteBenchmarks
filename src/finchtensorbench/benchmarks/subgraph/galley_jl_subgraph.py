@@ -11,9 +11,14 @@ queries, data and true counts are the ones its paper used.  The timing follows
   load and are not part of either time.
 
 ``--jobs`` workers, each pinned to one of ``--cpus``, take the queries in
-blocks of ``--max-queries-per-worker``.  A query exceeding ``--timeout`` seconds, or a worker above
-``--memory-limit-gb`` of resident memory, is killed and recorded; a fresh
-worker continues with the next query.
+blocks of ``--max-queries-per-worker``; each worker runs one untimed query
+first, like the finch workers' warm-up.  As in the finch benchmark, the cold
+first call may take ``--first-timeout`` seconds and the timed calls together
+``--timeout`` seconds, for every query alike.  A query exceeding either, or a
+worker above ``--memory-limit-gb`` of resident memory, is killed and recorded;
+a fresh worker continues with the next query.  Julia is told the limit
+(``--heap-size-hint``, by default 80% of it), so its garbage collector works
+within it instead of letting memory grow until the worker is killed.
 
 Run with::
 
@@ -96,9 +101,13 @@ class Worker:
     """One Julia process serving queries ``first..last``."""
 
     def __init__(self, args, cpu: int, first: int, last: int):
+        hint = args.heap_size_hint_gb
+        if hint is None:
+            hint = 0.8 * args.memory_limit_gb
         cmd = [
             "taskset", "-c", str(cpu), *args.julia.split(),
             f"--project={args.galley_root}", "--startup-file=no",
+            *([f"--heap-size-hint={max(1, int(hint * 1024))}M"] if hint else []),
             str(WORKER), WORKLOADS[args.dataset], str(first), str(last), str(args.runs),
         ]
         self.log = open(args.log_dir / f"worker_{first}.log", "w")
@@ -133,10 +142,13 @@ def record(args, cpu, path, status, worker_query, *, expected="", count="", firs
                status=status, ground_truth=expected, result=count, error=error,
                cpu=cpu, worker_query=worker_query)
     if status == "ok":
-        row["correct"] = "" if expected == "" else str(int(count) == int(expected))
+        # Compared as float64, as the finch benchmark does (finch's counts are
+        # float64; counts above 2**53 are not exact in either).
+        same = expected != "" and float(count) == float(expected)
+        row["correct"] = "" if expected == "" else str(same)
         if expected == "":
             row["status"] = "unchecked"
-        elif int(count) != int(expected):
+        elif not same:
             row["status"] = "wrong"
         row["first_s"] = first
         row["opt_s"] = statistics.median(opt)
@@ -154,7 +166,13 @@ def main(argv=None):
     parser.add_argument("--galley-root", type=Path, default=Path.home() / "Galley.jl")
     parser.add_argument("--julia", default="julia +1.11")
     parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--timeout", type=float, default=120.0, help="seconds per query")
+    parser.add_argument("--timeout", type=float, default=120.0,
+                        help="seconds for a query's timed calls")
+    parser.add_argument("--first-timeout", type=float,
+                        help="seconds for a query's cold first call (default: --timeout)")
+    parser.add_argument("--heap-size-hint-gb", type=float,
+                        help="Julia --heap-size-hint (default: 80%% of --memory-limit-gb;"
+                        " 0 to omit)")
     parser.add_argument("--load-timeout", type=float, default=1800.0,
                         help="seconds a worker may take to load the workload")
     parser.add_argument("--max-queries-per-worker", type=int, default=50)
@@ -165,6 +183,8 @@ def main(argv=None):
     parser.add_argument("--limit", type=int, help="only the first N queries")
     parser.add_argument("--out-dir", type=Path, default=Path("graph/subgraph_matching"))
     args = parser.parse_args(argv)
+    if args.first_timeout is None:
+        args.first_timeout = args.timeout
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = args.out_dir / f"{args.dataset}_galleyjl_{stamp}.csv"
@@ -227,9 +247,12 @@ def main(argv=None):
                             n = int(msg[1])
                             state["total"] = min(n, args.limit) if args.limit else n
                     elif msg and msg[0] == "@@BEGIN":
-                        limit = args.timeout * (2 if served == 0 else 1)
-                        current = (int(msg[1]), msg[2], limit)
+                        limit = args.first_timeout
+                        current = (int(msg[1]), msg[2], limit, "cold")
                         deadline = now + limit
+                    elif msg and msg[0] == "@@COLD" and current is not None:
+                        current = (current[0], current[1], args.timeout, "timed")
+                        deadline = now + args.timeout
                     elif msg and msg[0] == "@@RESULT":
                         _, i, path, status, expected, count, first, opt, exec_, err = msg
                         floats = lambda s: [float(x) for x in s.split(";") if x]
@@ -250,7 +273,8 @@ def main(argv=None):
                         if current is None:
                             raise RuntimeError("worker failed to load the workload in time")
                         emit(record(args, cpu, current[1], "timeout" if over else "oom",
-                                    served, error=(f"exceeded {current[2]:g}s" if over
+                                    served, error=(f"{current[3]} phase exceeded "
+                                                   f"{current[2]:g}s" if over
                                                    else f"over {args.memory_limit_gb:g} GB")))
                         next_q = current[0] + 1
                         break

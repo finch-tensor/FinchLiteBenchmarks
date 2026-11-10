@@ -27,9 +27,19 @@ function main(args)
     workload = getfield(Main, Symbol(args[1]))::WORKLOAD
     first_q, last_q, runs = parse.(Int, args[2:4])
     queries = load_subgraph_workload(workload, DCStats, nothing)
+    run_query(q) = galley(q.query, ST=DCStats; faq_optimizer=pruned, verbose=0)
+    # Warm up, as the finch worker does, so Julia start-up and Galley's generic
+    # compilation are not charged to the first timed query: run one query
+    # outside this worker's block (the workload's first, or its second when the
+    # block starts there) and discard it.
+    if length(queries) > 1
+        try
+            run_query(queries[first_q == 1 ? 2 : 1])
+        catch
+        end
+    end
     println("@@READY\t", length(queries))
     flush(stdout)
-    run_query(q) = galley(q.query, ST=DCStats; faq_optimizer=pruned, verbose=0)
     for i in first_q:min(last_q, length(queries))
         q = queries[i]
         println("@@BEGIN\t", i, "\t", q.query_path)
@@ -37,6 +47,8 @@ function main(args)
         status, count, first_s, opt, exec, err = "ok", "", NaN, Float64[], Float64[], ""
         try
             first_s = @elapsed run_query(q)
+            println("@@COLD\t", i)
+            flush(stdout)
             for _ in 1:runs
                 result = run_query(q)
                 push!(opt, result.opt_time)
