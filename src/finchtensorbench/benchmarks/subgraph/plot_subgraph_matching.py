@@ -15,8 +15,8 @@ finch and Galley.jl on one dataset) are drawn together.  Writes
 from __future__ import annotations
 
 import argparse
-import textwrap
 import csv
+import textwrap
 from collections import Counter, defaultdict
 from pathlib import Path
 
