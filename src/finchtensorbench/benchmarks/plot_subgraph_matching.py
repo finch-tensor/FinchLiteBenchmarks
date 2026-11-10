@@ -15,6 +15,7 @@ finch and Galley.jl on one dataset) are drawn together.  Writes
 from __future__ import annotations
 
 import argparse
+import textwrap
 import csv
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -62,7 +63,7 @@ def _family_key(family):
     return (shape, int(size) if size.isdigit() else 0)
 
 
-def plot(paths, out=None, paired=False, palette=None):
+def plot(paths, out=None, paired=False, palette=None, cap=None):
     rows = [row for path in paths for row in load(path)]
     configs = list(dict.fromkeys(r["config"] for r in rows))
     series = palette or SERIES
@@ -100,12 +101,21 @@ def plot(paths, out=None, paired=False, palette=None):
     for r in rows:
         if r["status"] not in ("ok", "unchecked"):
             failed[(r["config"], r["status"])] += 1
-            continue
-        if paired and any(m == "" for m in (r.get(k, "") for k, _ in METRICS)):
-            continue
+            if cap is None:
+                continue
         for metric, _ in METRICS:
+            if r["status"] in ("ok", "unchecked") and r.get(metric, "") != "":
+                value = float(r[metric])
+            elif cap is not None:
+                # A failed query (or a missing time) counts as the time cap,
+                # so every config's box covers every query it was given.
+                value = cap
+            else:
+                continue
+            if cap is not None:
+                value = min(value, cap)
             for group in (group_of(r), "All"):
-                ok[(metric, r["config"], group)].append(float(r[metric]))
+                ok[(metric, r["config"], group)].append(value)
 
     width = 0.8 / len(configs)
     fig, axes = plt.subplots(
@@ -135,13 +145,15 @@ def plot(paths, out=None, paired=False, palette=None):
                 ax.scatter(x + jitter, values, s=9, color=color, alpha=0.55,
                            linewidths=0, zorder=3)  # fmt: skip
         ax.set_yscale("log")
+        if cap is not None:
+            ax.axhline(cap, color=TEXT_2, lw=0.8, ls="--", zorder=1)
         ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1.0,), numticks=20))
         ax.yaxis.set_major_formatter(FuncFormatter(_seconds))
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.set_xticks(range(len(groups)))
         counts = Counter(
             group_of(r) for r in rows if r["config"] == configs[0]
-            and (not paired or r["status"] in ("ok", "unchecked"))
+            and (cap is not None or not paired or r["status"] in ("ok", "unchecked"))
         )
         counts["All"] = sum(counts.values())
         ax.set_xticklabels(
@@ -169,13 +181,19 @@ def plot(paths, out=None, paired=False, palette=None):
     fig.suptitle(f"{' vs '.join(configs)} on {dataset}: runtime per query",
                  x=0.01, ha="left", fontsize=12, color=TEXT)  # fmt: skip
     note = "; ".join(f"{c}: {n} {s}" for (c, s), n in sorted(failed.items()))
-    which = (f"Paired: only queries every system finished correctly ({dropped} "
-             "queries left out). " if paired else "Correct results only. ")
-    fig.text(0.01, 0.005,
-             which + (f"Failures - {note}." if note else
-                      "All queries finished correctly."),
-             fontsize=8, color=TEXT_2)  # fmt: skip
-    fig.tight_layout(rect=(0, 0.02, 1, 0.97))
+    which = (
+        f"Failed queries (timeout, oom, crash, error, wrong) are drawn at the "
+        f"{_seconds(cap)} cap (dashed line). " if cap is not None
+        else f"Paired: only queries every system finished correctly ({dropped} "
+        "queries left out). " if paired else "Correct results only. "
+    )
+    footnote = textwrap.fill(
+        which + (f"Failures - {note}." if note else "All queries finished correctly."),
+        width=int(fig.get_figwidth() * 17),
+    )
+    lines = footnote.count("\n") + 1
+    fig.text(0.01, 0.005, footnote, fontsize=8, color=TEXT_2, va="bottom")
+    fig.tight_layout(rect=(0, 0.01 + 0.012 * lines, 1, 0.97))
     if out is None:
         out = Path(paths[0]).with_name(Path(paths[0]).stem + "_boxplot.png")
     fig.savefig(out, dpi=150, facecolor=SURFACE)
@@ -192,8 +210,14 @@ def main(argv=None):
         action="store_true",
         help="only plot queries every config finished correctly",
     )
+    parser.add_argument(
+        "--cap",
+        type=float,
+        help="draw failed queries at this many seconds (e.g. the timeout) "
+        "instead of leaving them out; times above it are clipped to it",
+    )
     args = parser.parse_args(argv)
-    plot(args.csv, args.out, paired=args.paired)
+    plot(args.csv, args.out, paired=args.paired, cap=args.cap)
 
 
 if __name__ == "__main__":
