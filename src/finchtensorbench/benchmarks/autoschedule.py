@@ -11,9 +11,10 @@ from these choices:
   (DefaultLogicFormatter)
 * stats: ``dc`` (memoised degree constraints), ``lp`` (memoised LpBound
   statistics), ``sampling`` (memoised sampling statistics, randomly seeded),
-  ``fd`` or ``uniform``
+  ``vp`` (memoised value-propagation statistics), ``fd`` or ``uniform``
 * workspace: whether a LogicWorkspacer sits between loop ordering and
-  formatting (spelled as a trailing ``/ws``)
+  formatting, spelled as a trailing ``/ws`` (workspaces, then input
+  reformats), ``/ws-only`` (workspaces only) or ``/rf`` (input reformats only)
 
 The two stock Julia pipelines are the presets ``default``
 (``finch.autoschedule.default_schedulers.COMPILE_JULIA``) and ``galley``
@@ -61,6 +62,10 @@ try:  # wma/dropfill: drop the fills of aggregates over dense loops
 except ImportError:  # finch-tensor without drop_fills
     LogicFillDropper = None
 from finch.autoschedule.workspacer import LogicWorkspacer
+from finch.autoschedule.workspacer.workspacer import (
+    add_cost_effective_reformats,
+    add_cost_effective_workspaces,
+)
 
 try:  # finch-tensor kbd/subgraph-fixes: price workspaces with Galley's formats
     from finch.autoschedule.workspacer import galley_format_cost
@@ -74,6 +79,11 @@ from finch.autoschedule.tensor_stats import (
     UniformStatsFactory,
 )
 from finch.autoschedule.tensor_stats.memo_stats import MemoStatsFactory
+
+try:  # value-propagation statistics
+    from finch.autoschedule.tensor_stats import VPStatsFactory
+except ImportError:  # finch-tensor without vp_stats
+    VPStatsFactory = None
 from finch.compile_jl.compiler import FinchJLCompiler
 from finch.finch_logic import Aggregate, LogicSimplify, Reorder
 
@@ -85,6 +95,7 @@ LOOP_ORDERERS = {
     "dfs": DFSLoopOrderer,
 }
 FORMATTERS = ("fd", "galley", "cost", "dense")
+WORKSPACERS = ("ws", "ws-only", "rf")
 STATS = {
     "dc": lambda: MemoStatsFactory(DCStatsFactory()),
     # LpBound: degree-sequence norms p in (0, 1, 2, 3, 4, 5, inf), LP-flow bound
@@ -92,6 +103,8 @@ STATS = {
     # defaults: sample_nnz=10_000, estimator="sh3"
     "sampling": lambda: MemoStatsFactory(SamplingStatsFactory()),
     "fd": FDStatsFactory,
+    # value propagation (VPStatsFactory)
+    "vp": lambda: MemoStatsFactory(VPStatsFactory()),
     "uniform": UniformStatsFactory,
 }
 STAGES = ("stats", "logic", "loop", "workspace", "lower")
@@ -104,6 +117,9 @@ class SchedulerConfig:
     formatter: str
     stats: str
     workspace: bool = False
+    # with a workspace: "ws" stages workspaces then input reformats, as
+    # LogicWorkspacer does; "ws-only" only workspaces; "rf" only reformats
+    workspacer: str = "ws"
 
     def __post_init__(self):
         for value, choices, axis in (
@@ -114,11 +130,15 @@ class SchedulerConfig:
         ):
             if value not in choices:
                 raise ValueError(f"unknown {axis} {value!r}; choose from {choices}")
+        if self.workspacer not in WORKSPACERS:
+            raise ValueError(
+                f"unknown workspacer {self.workspacer!r}; choose from {WORKSPACERS}"
+            )
 
     @property
     def name(self) -> str:
         name = f"{self.logic}/{self.loop}/{self.formatter}/{self.stats}"
-        return name + "/ws" if self.workspace else name
+        return f"{name}/{self.workspacer}" if self.workspace else name
 
 
 PRESETS = {
@@ -137,20 +157,27 @@ PRESETS = {
 
 
 def parse_config(text: str) -> SchedulerConfig:
-    """A preset name or ``logic/loop/formatter/stats[/ws]``."""
+    """A preset name or ``logic/loop/formatter/stats[/ws|/ws-only|/rf]``."""
     if text in PRESETS:
         return PRESETS[text]
     parts = text.split("/")
-    workspace = parts[-1] == "ws"
-    if workspace:
+    workspacer = parts[-1] if parts[-1] in WORKSPACERS else None
+    if workspacer:
         parts = parts[:-1]
     if len(parts) != 4:
         raise ValueError(
             f"config {text!r} must be a preset {tuple(PRESETS)} or "
-            "logic/loop/formatter/stats[/ws]"
+            "logic/loop/formatter/stats[/ws|/ws-only|/rf]"
         )
     logic, loop, formatter, stats = parts
-    return SchedulerConfig(logic, loop, formatter, stats, workspace=workspace)
+    return SchedulerConfig(
+        logic,
+        loop,
+        formatter,
+        stats,
+        workspace=workspacer is not None,
+        workspacer=workspacer or "ws",
+    )
 
 
 def config_label(config: SchedulerConfig) -> str:
@@ -247,6 +274,23 @@ PLAN_STAGES = {
 }
 
 
+class _PartialWorkspacer(LogicWorkspacer):
+    """LogicWorkspacer with its workspaces or its input reformats turned off."""
+
+    def __init__(self, ctx, *, workspaces=True, reformats=True, **options):
+        super().__init__(ctx, **options)
+        self.workspaces, self.reformats = workspaces, reformats
+
+    def lower(self, prgm, bindings, stats, stats_factory):
+        args = (bindings, stats, stats_factory, self.cost_model, self.options,
+                self.format_cost)  # fmt: skip
+        if self.workspaces:
+            prgm = add_cost_effective_workspaces(prgm, *args)
+        if self.reformats:
+            prgm = add_cost_effective_reformats(prgm, *args)
+        return self.ctx(prgm, bindings, stats, stats_factory)
+
+
 def build_scheduler(config: SchedulerConfig, cache: bool = True, on_program=None):
     """Assemble a scheduler; ``ctx.timer`` and ``ctx.captures`` expose timings.
 
@@ -281,7 +325,13 @@ def build_scheduler(config: SchedulerConfig, cache: bool = True, on_program=None
         options = {}
         if config.formatter == "galley" and galley_format_cost is not None:
             options["format_cost"] = galley_format_cost
-        formatter = _TimedStage(LogicWorkspacer(formatter, **options), timer, "workspace")
+        workspacer = _PartialWorkspacer(
+            formatter,
+            workspaces=config.workspacer != "rf",
+            reformats=config.workspacer != "ws-only",
+            **options,
+        )
+        formatter = _TimedStage(workspacer, timer, "workspace")
     formatter = tap(formatter, "loop")
     loop = _TimedStage(LOOP_ORDERERS[config.loop](formatter), timer, "loop")
     simplified = tap(LogicSimplify(loop), "logic")
