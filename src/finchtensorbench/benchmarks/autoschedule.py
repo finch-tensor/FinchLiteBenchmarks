@@ -11,7 +11,8 @@ from these choices:
   (DefaultLogicFormatter)
 * stats: ``dc`` (memoised degree constraints), ``lp`` (memoised LpBound
   statistics), ``sampling`` (memoised sampling statistics, randomly seeded),
-  ``vp`` (memoised value-propagation statistics), ``fd`` or ``uniform``
+  ``vp`` (memoised value-propagation statistics), ``bu`` (memoised blocked
+  uniform statistics), ``fd`` or ``uniform``
 * workspace: whether a LogicWorkspacer sits between loop ordering and
   formatting, spelled as a trailing ``/ws`` (workspaces, then input
   reformats), ``/ws-only`` (workspaces only) or ``/rf`` (input reformats only)
@@ -72,6 +73,7 @@ try:  # finch-tensor kbd/subgraph-fixes: price workspaces with Galley's formats
 except ImportError:  # older finch-tensor
     galley_format_cost = None
 from finch.autoschedule.tensor_stats import (
+    BlockedUniformStatsFactory,
     DCStatsFactory,
     FDStatsFactory,
     LPStatsFactory,
@@ -106,6 +108,9 @@ STATS = {
     # value propagation (VPStatsFactory)
     "vp": lambda: MemoStatsFactory(VPStatsFactory()),
     "uniform": UniformStatsFactory,
+    # blocked uniform: a 5x5 grid of block nnz counts (block_count=5,
+    # block_width=5), uniform within each block
+    "bu": lambda: MemoStatsFactory(BlockedUniformStatsFactory()),
 }
 
 
