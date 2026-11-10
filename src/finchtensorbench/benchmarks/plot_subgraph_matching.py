@@ -135,7 +135,7 @@ def plot(paths, out=None, paired=False, palette=None):
                 ax.scatter(x + jitter, values, s=9, color=color, alpha=0.55,
                            linewidths=0, zorder=3)  # fmt: skip
         ax.set_yscale("log")
-        ax.yaxis.set_major_locator(LogLocator(subs=(1, 2, 5)))
+        ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1.0,), numticks=20))
         ax.yaxis.set_major_formatter(FuncFormatter(_seconds))
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.set_xticks(range(len(groups)))
