@@ -28,8 +28,9 @@ time excludes the downstream stages it invokes:
 * ``logic_s``: logical (join/aggregate) optimization, plus LogicSimplify
 * ``loop_s``: loop ordering
 * ``workspace_s``: workspace insertion (0 when there is no workspacer)
-* ``lower_s``: formatting, protocol selection, code generation and, on a
-  kernel-cache miss, Julia compilation
+* ``lower_s``: merging sibling fuses (where finch has LogicFuseMerger),
+  formatting, protocol selection, code generation and, on a kernel-cache
+  miss, Julia compilation
 """
 
 from __future__ import annotations
@@ -72,6 +73,11 @@ try:  # finch-tensor kbd/subgraph-fixes: price workspaces with Galley's formats
     from finch.autoschedule.workspacer import galley_format_cost
 except ImportError:  # older finch-tensor
     galley_format_cost = None
+
+try:  # kbd/merge-sibling-fuses: merge sibling Fuse nodes before formatting
+    from finch.autoschedule.fuse_merger import LogicFuseMerger
+except ImportError:  # finch-tensor without the fuse merger
+    LogicFuseMerger = None
 from finch.autoschedule.tensor_stats import (
     BlockedUniformStatsFactory,
     DCStatsFactory,
@@ -340,6 +346,9 @@ def build_scheduler(config: SchedulerConfig, cache: bool = True, on_program=None
             formatter = CostFormatter(protocolizer)
     else:
         formatter = DefaultLogicFormatter(lowerer)
+    if LogicFuseMerger is not None:
+        # As the default schedulers: merge sibling fuses right before formatting.
+        formatter = LogicFuseMerger(formatter)
     formatter = _TimedStage(formatter, timer, "lower")
     if config.workspace:
         formatter = tap(formatter, "workspace")
