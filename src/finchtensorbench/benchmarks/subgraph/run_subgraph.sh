@@ -23,8 +23,8 @@
 set -euo pipefail
 
 datasets=human
-configs="default galley"
-jobs=1
+configs="galley-cost galley-lp"
+jobs=4
 memory_gb=16
 galley_jl=0
 galley_args=""
