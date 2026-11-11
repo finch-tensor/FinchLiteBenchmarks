@@ -1,7 +1,10 @@
 """Benchmark Galley.jl (Finch.jl backend) on the subgraph-matching workloads.
 
-Galley.jl is run from a local checkout with its own experiment loaders, so the
-queries, data and true counts are the ones its paper used.  The timing follows
+Galley.jl is installed by Julia's package manager into the project in
+``galley_jl/`` (pinned there to a registered release), and the worker loads the
+graphs and queries as Galley.jl's experiments do.  The data, queries and true
+counts are the ones :mod:`finchtensorbench.gcare` downloads for the finch
+benchmark (the same files as Galley.jl's paper used).  The timing follows
 :mod:`finchtensorbench.benchmarks.subgraph.subgraph_matching`, so the two CSVs line up:
 
 * ``first``: one ``galley()`` call, compiling the query's kernels;
@@ -20,7 +23,8 @@ a fresh worker continues with the next query.  Julia is told the limit
 (``--heap-size-hint``, by default 80% of it), so its garbage collector works
 within it instead of letting memory grow until the worker is killed.
 
-Run with::
+Julia comes from ``--julia`` (default ``$JULIA``, else ``julia`` on the PATH);
+the first run installs and precompiles Galley.jl.  Run with::
 
     pixi run python -m finchtensorbench.benchmarks.subgraph.galley_jl_subgraph --dataset aids
 """
@@ -41,18 +45,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-# our dataset name -> Galley.jl WORKLOAD
-WORKLOADS = {
-    "aids": "aids",
-    "human": "human",
-    "yeast": "yeast_lite",
-    "dblp": "dblp_lite",
-    # dense_8 and sparse_16, copied into Galley.jl's Subgraph_Queries/<graph>
-    # (see gcare.SGM_DATASETS["<graph>_ext"])
-    "dblp_ext": "dblp",
-    "youtube_ext": "youtube",
-    "youtube": "youtube_lite",
-}
+from finchtensorbench import gcare
+
+# G-CARE datasets (directed, labelled edges) and Sun & Luo subgraph-matching
+# ones (gcare.SGM_DATASETS: one vertex label, undirected unlabelled edges)
+GCARE_DATASETS = ("aids", "human", "lubm80", "yago")
+DATASETS = (*GCARE_DATASETS, *gcare.SGM_DATASETS)
 CONFIG = "galley.jl"
 FIELDS = [
     "dataset", "config", "query", "family", "status", "ground_truth", "result",
@@ -60,31 +58,41 @@ FIELDS = [
     "exec_mean_s", "exec_samples", "error", "cpu", "worker_query",
 ]
 WORKER = Path(__file__).with_name("galley_jl_subgraph.jl")
+PROJECT = Path(__file__).with_name("galley_jl")
 
 
-def query_name(path: str) -> tuple[str, str]:
-    """Galley.jl query path -> (our query name, family)."""
-    p = Path(path)
-    if p.parent.name.endswith("-lite") or p.parent.name in ("dblp", "youtube"):
-        family = re.fullmatch(r"query_(.+)_\d+", p.stem).group(1)
-        return f"{family}/{p.stem}", family
-    return f"{p.parent.name}/{p.stem}", p.parent.name
+def workload(args):
+    """Download *args.dataset* if needed; return its graph kind ("gcare" or
+    "sgm"), graph file, and queries as (name, family, file, true count)."""
+    if args.dataset in gcare.SGM_DATASETS:
+        root = gcare.ensure_sgm_downloaded(args.dataset, args.data_dir)
+        kind, graph = "sgm", root / "graph.txt"
+        query_root, truth_root = root / "queries", root / "truth"
+    else:
+        root = gcare.ensure_downloaded(args.data_dir)
+        kind, graph = "gcare", root / "dataset" / args.dataset / f"{args.dataset}.txt"
+        query_root = root / "queryset" / args.dataset
+        truth_root = root / "ground_truth" / args.dataset
+    queries = []
+    for name in gcare.list_queries(args.dataset, args.data_dir):
+        truth = truth_root / f"{name}.txt"
+        count = truth.read_text().split()[0] if truth.is_file() else ""
+        queries.append((name, name.split("/")[0], query_root / f"{name}.txt", count))
+    return kind, graph, queries
 
 
-def true_count(args, path: str) -> str:
-    """Galley.jl's true count for a query, as its loader reads it.
+def julia_cmd(args):
+    return [*args.julia.split(), f"--project={PROJECT}", "--startup-file=no"]
 
-    Galley.jl looks for a "-lite" query's count under the "-lite" folder, which
-    has none; the counts are under the full workload's folder.
-    """
-    p = Path(path.replace("Subgraph_Queries", "Subgraph_TrueCardinalities"))
-    if p.parent.name.endswith("-lite"):
-        p = p.parent.parent / p.parent.name.removesuffix("-lite") / p.name
-    p = args.galley_root / p
-    if not p.is_file():
-        return ""
-    lines = [line.split() for line in p.read_text().splitlines() if line.strip()]
-    return lines[-1][0] if lines else ""
+
+def setup_julia(args):
+    """Install and precompile the pinned Galley.jl once, before the workers
+    start, so they neither race to do it nor spend their load time on it."""
+    print(f"setting up Galley.jl in {PROJECT} ...", flush=True)
+    subprocess.run(
+        [*julia_cmd(args), "-e", "using Pkg; Pkg.instantiate(); using Galley"],
+        check=True, timeout=args.load_timeout,
+    )
 
 
 def rss_gb(pid: int) -> float:
@@ -105,14 +113,13 @@ class Worker:
         if hint is None:
             hint = 0.8 * args.memory_limit_gb
         cmd = [
-            "taskset", "-c", str(cpu), *args.julia.split(),
-            f"--project={args.galley_root}", "--startup-file=no",
+            "taskset", "-c", str(cpu), *julia_cmd(args),
             *([f"--heap-size-hint={max(1, int(hint * 1024))}M"] if hint else []),
-            str(WORKER), WORKLOADS[args.dataset], str(first), str(last), str(args.runs),
+            str(WORKER), str(args.manifest), str(first), str(last), str(args.runs),
         ]
         self.log = open(args.log_dir / f"worker_{first}.log", "w")
         self.process = subprocess.Popen(
-            cmd, cwd=args.galley_root, stdout=subprocess.PIPE,
+            cmd, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, start_new_session=True,
         )
         self.lines: queue.Queue = queue.Queue()
@@ -133,10 +140,9 @@ class Worker:
         self.log.close()
 
 
-def record(args, cpu, path, status, worker_query, *, expected="", count="", first="",
+def record(args, cpu, index, status, worker_query, *, count="", first="",
            opt=(), exec_=(), error=""):
-    name, family = query_name(path)
-    expected = expected or true_count(args, path)
+    name, family, _, expected = args.queries[index - 1]
     row = dict.fromkeys(FIELDS, "")
     row.update(dataset=args.dataset, config=CONFIG, query=name, family=family,
                status=status, ground_truth=expected, result=count, error=error,
@@ -162,9 +168,10 @@ def record(args, cpu, path, status, worker_query, *, expected="", count="", firs
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--dataset", required=True, choices=sorted(WORKLOADS))
-    parser.add_argument("--galley-root", type=Path, default=Path.home() / "Galley.jl")
-    parser.add_argument("--julia", default="julia +1.11")
+    parser.add_argument("--dataset", required=True, choices=sorted(DATASETS))
+    parser.add_argument("--data-dir", type=Path, help="G-CARE data root (see gcare.data_dir)")
+    parser.add_argument("--julia", default=os.environ.get("JULIA", "julia"),
+                        help="Julia command, e.g. 'julia +1.11' (default: $JULIA or julia)")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=120.0,
                         help="seconds for a query's timed calls")
@@ -190,6 +197,12 @@ def main(argv=None):
     out = args.out_dir / f"{args.dataset}_galleyjl_{stamp}.csv"
     args.log_dir = args.out_dir / f"{args.dataset}_galleyjl_{stamp}_logs"
     args.log_dir.mkdir(parents=True, exist_ok=True)
+    kind, graph, args.queries = workload(args)
+    args.manifest = args.log_dir / "manifest.tsv"
+    args.manifest.write_text(f"graph\t{kind}\t{graph.resolve()}\n" + "".join(
+        f"query\t{path.resolve()}\n" for _, _, path, _ in args.queries))
+    print(f"{args.dataset}: {len(args.queries)} queries", flush=True)
+    setup_julia(args)
     cpus = args.cpus or list(range(args.jobs))
     if len(cpus) < args.jobs:
         parser.error("--cpus needs one CPU per job")
@@ -248,16 +261,15 @@ def main(argv=None):
                             state["total"] = min(n, args.limit) if args.limit else n
                     elif msg and msg[0] == "@@BEGIN":
                         limit = args.first_timeout
-                        current = (int(msg[1]), msg[2], limit, "cold")
+                        current = (int(msg[1]), int(msg[1]), limit, "cold")
                         deadline = now + limit
                     elif msg and msg[0] == "@@COLD" and current is not None:
                         current = (current[0], current[1], args.timeout, "timed")
                         deadline = now + args.timeout
                     elif msg and msg[0] == "@@RESULT":
-                        _, i, path, status, expected, count, first, opt, exec_, err = msg
+                        _, i, status, count, first, opt, exec_, err = msg
                         floats = lambda s: [float(x) for x in s.split(";") if x]
-                        emit(record(args, cpu, path, status, served, expected=expected,
-                                    count=count, first=float(first), opt=floats(opt),
+                        emit(record(args, cpu, int(i), status, served, count=count, first=float(first), opt=floats(opt),
                                     exec_=floats(exec_), error=err))
                         served += 1
                         next_q = int(i) + 1
