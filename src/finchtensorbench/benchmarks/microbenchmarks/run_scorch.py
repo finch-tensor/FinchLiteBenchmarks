@@ -10,7 +10,7 @@ import torch
 
 import scorch
 
-from finchtensorbench.benchmarks.scripts.util import feature_matrix, paper_spgemm
+from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, paper_spgemm
 
 ROWS = 5000
 COLS = 5000

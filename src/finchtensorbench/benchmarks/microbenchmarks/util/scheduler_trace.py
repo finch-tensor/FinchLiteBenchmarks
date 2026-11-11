@@ -11,7 +11,7 @@ from finch.autoschedule.workspacer import (
 )
 from finch.compile_jl.compiler import FinchJLCompiler
 
-from finchtensorbench.benchmarks.scripts.util.trace_stats import format_config, format_stats
+from finchtensorbench.benchmarks.microbenchmarks.util.trace_stats import format_config, format_stats
 
 
 class SchedulerTrace:

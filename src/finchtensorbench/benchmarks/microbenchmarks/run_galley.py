@@ -10,7 +10,7 @@ import scipy.sparse as sps
 import galley_jl_python as gl
 from galley_jl_python.julia import jl
 
-from finchtensorbench.benchmarks.scripts.util import feature_matrix, paper_spgemm
+from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, paper_spgemm
 
 ROWS = 5000
 COLS = 5000

@@ -18,7 +18,7 @@ from src.file_storing import read_baskets_from_json
 from src.generate_taco_schedule import UnfusedConfigToTacoVisitor
 from src.main_run_test_modified import ALLOWED_ELEMENT_SIZE
 
-from finchtensorbench.benchmarks.scripts.util import feature_matrix, paper_spgemm
+from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, paper_spgemm
 
 ROOT = Path(os.environ["PIXI_PROJECT_ROOT"])
 SCHEDULER = ROOT / "external/tensor-schedules"

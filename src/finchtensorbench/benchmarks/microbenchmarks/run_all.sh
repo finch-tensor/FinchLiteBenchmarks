@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Run every benchmark backend, then plot the results. Also: pixi run run-all [backends...]
 #
-#   src/finchtensorbench/benchmarks/scripts/run_all.sh                     # all backends
-#   src/finchtensorbench/benchmarks/scripts/run_all.sh finch galley        # only the named backends
-#   THREADS=4 src/finchtensorbench/benchmarks/scripts/run_all.sh           # change the thread count (default 1)
+#   src/finchtensorbench/benchmarks/microbenchmarks/run_all.sh                     # all backends
+#   src/finchtensorbench/benchmarks/microbenchmarks/run_all.sh finch galley        # only the named backends
+#   THREADS=4 src/finchtensorbench/benchmarks/microbenchmarks/run_all.sh           # change the thread count (default 1)
 #
 # Each runner overwrites its CSV in graph/scripts/.
 # A failing backend does not stop the others; the script exits non-zero at the end.
 set -uo pipefail
 
-# This file lives in src/finchtensorbench/benchmarks/scripts/; work from the repo root.
+# This file lives in src/finchtensorbench/benchmarks/microbenchmarks/; work from the repo root.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$ROOT"
-SCRIPTS=src/finchtensorbench/benchmarks/scripts
+SCRIPTS=src/finchtensorbench/benchmarks/microbenchmarks
 RESULTS=graph/scripts
 
 ######################### 1. Environment ##########################

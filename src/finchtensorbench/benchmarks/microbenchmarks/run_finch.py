@@ -11,13 +11,13 @@ import finch as ft
 from finch.autoschedule import COMPILE_JULIA_GALLEY
 from finch.tensor.scalar import ConstantScalar
 
-from finchtensorbench.benchmarks.scripts.util import feature_matrix, paper_spgemm
-from finchtensorbench.benchmarks.scripts.util.scheduler_trace import (
+from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, paper_spgemm
+from finchtensorbench.benchmarks.microbenchmarks.util.scheduler_trace import (
     capture_scheduler,
     configured_scheduler,
     finish_capture,
 )
-from finchtensorbench.benchmarks.scripts.util.search_trace import capture_search
+from finchtensorbench.benchmarks.microbenchmarks.util.search_trace import capture_search
 
 ROWS = 5000
 COLS = 5000
