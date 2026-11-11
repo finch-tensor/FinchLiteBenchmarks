@@ -114,7 +114,8 @@ def matrix_feature_cases():
     matrix.indices = matrix.indices.astype(np.intp)
     matrix.indptr = matrix.indptr.astype(np.intp)
     a = ft.asarray(matrix)
-    return [(f"features_{count}", (a, count)) for count in (1, 2, 3, 4)]
+    return [(f"features_{count}", (a, count))
+            for count in range(1, len(feature_matrix.POWERS) + 1)]
 
 
 ######################### Main ##########################

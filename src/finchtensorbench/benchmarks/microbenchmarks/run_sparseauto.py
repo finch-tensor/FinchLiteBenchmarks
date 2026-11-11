@@ -329,7 +329,7 @@ def matrix_feature_benchmark(directory):
     return [("features", count, {
         "env": {"TENSOR_FILE": path, "FINCHBENCH_COUNT": str(count)},
         "expected": float(sum(f.sum() for f in features[:count])),
-    }) for count in (1, 2, 3, 4)]
+    }) for count in range(1, len(feature_matrix.POWERS) + 1)]
 
 
 ######################### SparseAuto pipeline ##########################

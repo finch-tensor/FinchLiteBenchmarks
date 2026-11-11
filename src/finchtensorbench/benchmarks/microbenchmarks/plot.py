@@ -10,6 +10,9 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix
+
+MAX_NORMS = len(feature_matrix.POWERS)
 
 PLOTS = {
     "sddmm": ("SDDMM", "Mask density"),
@@ -55,8 +58,8 @@ def load_results(inputs):
                     raise ValueError(f"{path}:{line}: seconds must be finite and positive")
                 if not np.isfinite(point) or point <= 0:
                     raise ValueError(f"{path}:{line}: sweep values must be positive")
-                if family == "matrix_features" and point not in (1, 2, 3, 4):
-                    raise ValueError(f"{path}:{line}: num_stats must be between 1 and 4")
+                if family == "matrix_features" and point not in range(1, MAX_NORMS + 1):
+                    raise ValueError(f"{path}:{line}: num_stats must be between 1 and {MAX_NORMS}")
                 results[family][(backend, variant)][point].append(seconds * 1000)
     return results
 
@@ -87,7 +90,9 @@ def draw_plot(axis, family, series, colors):
                       linestyle="--" if outer else "-", markersize=5)
 
     if family == "matrix_features":
-        axis.set_xticks(range(4), ("1\nL1", "2\n+ L2", "3\n+ L3", "4\n+ L4"))
+        counts = sorted({int(point) for points in series.values() for point in points})
+        axis.set_xticks([c - 1 for c in counts],
+                        [f"{c}\nL1" if c == 1 else f"{c}\n+ L{c}" for c in counts])
         axis.set_ylim(bottom=0)
         axis.grid(axis="y", alpha=0.2)
     else:

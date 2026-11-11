@@ -104,11 +104,18 @@ def spgemm_cases(dtype):
 ######################### Matrix Features ##########################
 
 def power(values, p):
-    # torch's CPU pow special-cases exponents 2 and 3; others (4) take a generic path
-    # that is ~40x slower here, so x^4 is computed as square(square(x)).
-    if p == 4:
-        return torch.square(torch.square(values))
-    return values ** p
+    # torch's CPU pow special-cases exponents 2 and 3; others take a generic path that
+    # is ~40x slower here, so larger integer powers are computed by repeated squaring.
+    if p in (2, 3):
+        return values ** p
+    result, base = None, values
+    while p:
+        if p & 1:
+            result = base if result is None else result * base
+        p >>= 1
+        if p:
+            base = torch.square(base)
+    return result
 
 
 def matrix_features(a, ones, count):
