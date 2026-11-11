@@ -2,9 +2,14 @@
 
     pixi run python -m finchtensorbench.benchmarks.subgraph.compare_subgraph \\
         graph/subgraph_matching/dblp_<stamp>.csv graph/subgraph_matching/dblp_galleyjl_<stamp>.csv \\
-        --baseline galley.jl --metric exec_median_s --penalty 600
+        [--baseline galley.jl] [--metric exec_median_s] [--penalty 600]
 
-For each dataset and family, and each system against ``--baseline``:
+A system is a scheduler config (``galley.jl`` for Galley.jl runs).  The
+baseline defaults to the config of the last CSV given.  With no CSVs, the
+newest finch and Galley.jl runs of ``--dataset`` in ``--dir`` are compared; a
+run may still be going, since CSVs are written row by row.
+
+For each dataset and family, and each system against the baseline:
 
 * ``paired``: queries both finished with a correct (or unchecked) count; the
   geometric mean of system/baseline, a 95% bootstrap interval for it, the median
@@ -22,35 +27,38 @@ of both comparisons, and counted as ``missing``.
 from __future__ import annotations
 
 import argparse
-import csv
 import math
 import random
+import re
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
 
-GOOD = ("ok", "unchecked")
+from finchtensorbench.benchmarks.subgraph.results import DONE, geomean, read_rows
 
 
 def load(paths):
     """{system: {(dataset, query): row}} from the CSVs; a system is a config."""
     rows: dict[str, dict] = defaultdict(dict)
     for path in paths:
-        with open(path, newline="") as file:
-            for row in csv.DictReader(file):
-                dataset = row["dataset"].removesuffix("_ext")
-                rows[row["config"]][(dataset, row["query"])] = row
+        for row in read_rows(path):
+            dataset = row["dataset"].removesuffix("_ext")
+            rows[row["config"]][(dataset, row["query"])] = row
     return rows
 
 
+def newest(directory: Path, pattern: str) -> Path:
+    """The newest CSV in *directory* whose stem fully matches *pattern*."""
+    runs = [p for p in directory.glob("*.csv") if re.fullmatch(pattern, p.stem)]
+    if not runs:
+        raise SystemExit(f"no CSV matching {pattern} in {directory}")
+    return max(runs, key=lambda p: p.stem[-15:])
+
+
 def value(row, metric):
-    if row["status"] in GOOD and row.get(metric):
+    if row["status"] in DONE and row.get(metric):
         return float(row[metric])
     return None
-
-
-def geomean(xs):
-    return math.exp(statistics.fmean(map(math.log, xs))) if xs else float("nan")
 
 
 def bootstrap(ratios, reps=2000, seed=0):
@@ -105,8 +113,12 @@ def compare(system, baseline, metric, penalty):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("csv", type=Path, nargs="+")
-    parser.add_argument("--baseline", required=True, help="config to compare against")
+    parser.add_argument("csv", type=Path, nargs="*")
+    parser.add_argument("--dataset", help="with no CSVs: compare this dataset's newest runs")
+    parser.add_argument("--dir", type=Path, default=Path("graph/subgraph_matching"))
+    parser.add_argument(
+        "--baseline", help="config to compare against (default: the last CSV's)"
+    )
     parser.add_argument("--systems", nargs="+", help="configs to compare (default: all)")
     parser.add_argument("--metric", default="exec_median_s")
     parser.add_argument(
@@ -118,7 +130,16 @@ def main(argv=None):
     parser.add_argument("--out", type=Path, help="also write the table as CSV")
     args = parser.parse_args(argv)
 
+    if not args.csv:
+        if not args.dataset:
+            parser.error("give CSVs, or --dataset to compare its newest runs")
+        stamp = r"_\d{8}_\d{6}"
+        args.csv = [newest(args.dir, f"{args.dataset}{stamp}"),
+                    newest(args.dir, f"{args.dataset}_galleyjl{stamp}")]  # fmt: skip
+        print("comparing " + " and ".join(p.name for p in args.csv))
     rows = load(args.csv)
+    if args.baseline is None:
+        args.baseline = read_rows(args.csv[-1])[0]["config"]
     if args.baseline not in rows:
         parser.error(f"no rows for baseline {args.baseline!r}; have {sorted(rows)}")
     systems = args.systems or [s for s in rows if s != args.baseline]

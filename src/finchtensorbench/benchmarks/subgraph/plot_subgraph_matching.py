@@ -17,7 +17,6 @@ finch and Galley.jl on one dataset) are drawn together.  Writes
 from __future__ import annotations
 
 import argparse
-import csv
 import textwrap
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -33,6 +32,8 @@ from matplotlib.ticker import (  # noqa: E402
     NullFormatter,
 )
 
+from finchtensorbench.benchmarks.subgraph.results import DONE, read_rows  # noqa: E402
+
 # Categorical palette, one colour per config in order.
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
 SURFACE, TEXT, TEXT_2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
@@ -42,11 +43,6 @@ METRICS = (
     ("plan_total_s", "Fresh plan + execution (stats, optimize, lower; warm Julia)"),
     ("first_s", "First call (cold: includes Julia compilation of new kernels)"),
 )
-
-
-def load(path):
-    with open(path, newline="") as file:
-        return list(csv.DictReader(file))
 
 
 def _seconds(value, _pos=None):
@@ -66,7 +62,7 @@ def _family_key(family):
 
 
 def plot(paths, out=None, paired=False, palette=None, cap=None):
-    rows = [row for path in paths for row in load(path)]
+    rows = [row for path in paths for row in read_rows(path)]
     configs = list(dict.fromkeys(r["config"] for r in rows))
     series = palette or SERIES
     dropped = 0
@@ -80,7 +76,7 @@ def plot(paths, out=None, paired=False, palette=None, cap=None):
         good = defaultdict(set)  # (dataset, query) -> configs that got it right
         for r in rows:
             ran[(r["dataset"], r["family"])].add(r["config"])
-            if r["status"] in ("ok", "unchecked"):
+            if r["status"] in DONE:
                 good[(r["dataset"], r["query"])].add(r["config"])
         family = {(r["dataset"], r["query"]): r["family"] for r in rows}
         common = {
@@ -89,7 +85,7 @@ def plot(paths, out=None, paired=False, palette=None, cap=None):
         }
         dropped = len(set(family) - common)
         rows = [r for r in rows if (r["dataset"], r["query"]) in common
-                or r["status"] not in ("ok", "unchecked")]
+                or r["status"] not in DONE]
     families = sorted({r["family"] for r in rows}, key=_family_key)
     # Many families (e.g. AIDS: Chain_3 ... Tree_12) are grouped by shape.
     by_shape = len(families) > MAX_FAMILY_GROUPS
@@ -101,12 +97,12 @@ def plot(paths, out=None, paired=False, palette=None, cap=None):
     ok = defaultdict(list)  # (metric, config, group) -> values
     failed = Counter()  # (config, status)
     for r in rows:
-        if r["status"] not in ("ok", "unchecked"):
+        if r["status"] not in DONE:
             failed[(r["config"], r["status"])] += 1
             if cap is None:
                 continue
         for metric, _ in METRICS:
-            if r["status"] in ("ok", "unchecked") and r.get(metric, "") != "":
+            if r["status"] in DONE and r.get(metric, "") != "":
                 value = float(r[metric])
             elif cap is not None:
                 # A failed query (or a missing time) counts as the time cap,
@@ -155,7 +151,7 @@ def plot(paths, out=None, paired=False, palette=None, cap=None):
         ax.set_xticks(range(len(groups)))
         counts = Counter(
             group_of(r) for r in rows if r["config"] == configs[0]
-            and (cap is not None or not paired or r["status"] in ("ok", "unchecked"))
+            and (cap is not None or not paired or r["status"] in DONE)
         )
         counts["All"] = sum(counts.values())
         ax.set_xticklabels(

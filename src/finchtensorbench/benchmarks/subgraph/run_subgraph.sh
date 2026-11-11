@@ -18,7 +18,8 @@
 #       --galley-jl        also run Galley.jl
 #       --galley-args "…"  extra arguments for galley_jl_subgraph
 #       --no-finch         skip the finch run (e.g. Galley.jl only)
-#       --plot CSV...      only plot/compare existing CSVs, run nothing
+#       --plot CSV...      only plot/compare existing CSVs, run nothing (the
+#                          last CSV's config is the comparison baseline)
 #   --                     everything after is passed to subgraph_matching
 set -euo pipefail
 
@@ -50,7 +51,7 @@ while (($#)); do
         --no-finch) finch=0; shift ;;
         --plot) shift; while (($#)) && [[ "$1" != -* ]]; do plot_only+=("$1"); shift; done ;;
         --) shift; finch_args=("$@"); break ;;
-        -h|--help) sed -n '2,22p' "$SCRIPT" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,23p' "$SCRIPT" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
     esac
 done
@@ -76,16 +77,14 @@ plot_and_compare() {  # plot_and_compare FINCH_CSV|"" GALLEY_CSV|"" [OUT_PNG]
     py plot_subgraph_matching "${csvs[@]}" ${out:+--out "$out"}
     if [[ -n "$finch_csv" && -n "$galley_csv" ]]; then
         echo -e "\n== compare"
-        py compare_subgraph_runs "$finch_csv" --base "$galley_csv"
+        py compare_subgraph "$finch_csv" "$galley_csv"
     fi
 }
 
 if ((${#plot_only[@]})); then
     py plot_subgraph_matching "${plot_only[@]}"
     if ((${#plot_only[@]} > 1)); then
-        bases=()
-        for csv in "${plot_only[@]:1}"; do bases+=(--base "$csv"); done
-        py compare_subgraph_runs "${plot_only[0]}" "${bases[@]}"
+        py compare_subgraph "${plot_only[@]}"
     fi
     exit 0
 fi

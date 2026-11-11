@@ -33,10 +33,8 @@ from __future__ import annotations
 
 import argparse
 import csv
-import math
 import os
 import queue
-import re
 import signal
 import statistics
 import subprocess
@@ -46,6 +44,7 @@ from datetime import datetime
 from pathlib import Path
 
 from finchtensorbench import gcare
+from finchtensorbench.benchmarks.subgraph.results import print_summary
 
 # G-CARE datasets (directed, labelled edges) and Sun & Luo subgraph-matching
 # ones (gcare.SGM_DATASETS: one vertex label, undirected unlabelled edges)
@@ -319,21 +318,8 @@ def main(argv=None):
         if errors:
             raise errors[0]
 
-    summary(rows)
+    print_summary(rows)
     print(f"wrote {out}")
-
-
-def summary(rows):
-    statuses = ("ok", "unchecked", "wrong", "timeout", "oom", "error", "crash")
-    done = [r for r in rows if r["status"] in ("ok", "unchecked")]
-
-    def geo(key):
-        xs = [float(r[key]) for r in done]
-        return math.exp(sum(map(math.log, xs)) / len(xs)) if xs else float("nan")
-
-    print("\n" + "".join(f"{s:>10}" for s in statuses) + "  geomean exec  geomean plan")
-    print("".join(f"{sum(r['status'] == s for r in rows):>10}" for s in statuses)
-          + f"  {geo('exec_median_s'):>11.4g}s  {geo('plan_total_s'):>11.4g}s")
 
 
 if __name__ == "__main__":

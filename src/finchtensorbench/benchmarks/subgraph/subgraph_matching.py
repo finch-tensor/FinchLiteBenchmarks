@@ -24,8 +24,8 @@ Step 1 may take ``--first-timeout`` seconds and steps 2-3 together
 query falls in a worker's queue).  A query exceeding either kills the worker; it
 is recorded as a timeout and a new worker continues with the remaining queries.
 
-The plan saved for a query is the one steps 2-3 time; ``plan_same`` says
-whether step 1 planned the same (up to names).  Workers run with a fixed
+Each query's plan, as step 1 produces it, is saved under ``<csv stem>_plans``
+unless ``--no-plans`` is given.  Workers run with a fixed
 ``PYTHONHASHSEED`` (``--hash-seed``), and every row records the installed
 finch-tensor revision.
 
@@ -44,7 +44,6 @@ import math
 import os
 import queue
 import random
-import re
 import resource
 import statistics
 import subprocess
@@ -65,6 +64,7 @@ from finchtensorbench.benchmarks.autoschedule import (
     config_label,
     parse_config,
 )
+from finchtensorbench.benchmarks.subgraph.results import print_summary
 
 RESULTS_DIR = Path(__file__).resolve().parents[4] / "graph" / "subgraph_matching"
 RUNNER_MODULE = "finchtensorbench.benchmarks.subgraph.subgraph_matching"
@@ -91,7 +91,6 @@ FIELDS = (
     "plan_file",
     "cpu",
     "worker_query",
-    "plan_same",
     "hash_seed",
     "finch_revision",
 )
@@ -202,34 +201,6 @@ def counts_match(result: float, ground_truth) -> bool:
     return ground_truth is not None and float(result) == float(ground_truth)
 
 
-_NAME = re.compile(r"#([A-Za-z])#\d+")
-_TABLE = re.compile(r"\bA_\d+(?=\b|_)")
-_TRAILING_FIELDS = re.compile(r"((?:, #[A-Za-z]#\w+)+)\)$", re.MULTILINE)
-
-
-def normalize_plan(text: str) -> str:
-    """*text* with generated names (``#A#123``, ``#i#45``) renumbered in order
-    of appearance and each trailing list of aggregated fields sorted, so two
-    plans compare equal when they differ only in fresh names or set order."""
-    names: dict[str, str] = {}
-
-    def rename(match):
-        kind = match.group(1)
-        if match.group(0) not in names:
-            names[match.group(0)] = f"#{kind}#{sum(n[1] == kind for n in names)}"
-        return names[match.group(0)]
-
-    text = _NAME.sub(rename, text)
-    tables: dict[str, str] = {}
-    text = _TABLE.sub(
-        lambda m: tables.setdefault(m.group(0), f"A_{len(tables)}"), text
-    )
-    text = _TRAILING_FIELDS.sub(
-        lambda m: ", " + ", ".join(sorted(m.group(1)[2:].split(", "))) + ")", text
-    )
-    return "\n".join(" ".join(line.split()) for line in text.splitlines())
-
-
 def stage_text(stage, program, bindings) -> str:
     """How a plan file shows the program entering *stage*."""
     from finchtensorbench.benchmarks.autoschedule import PLAN_STAGES
@@ -266,9 +237,8 @@ class PlanRecorder:
     """Write a query's plan to a text file as the scheduler produces it.
 
     Each stage is flushed as soon as it is seen, so the plan survives a kernel
-    that times out, runs out of memory or crashes the worker.  The first
-    compute is recorded; if the timed one plans differently (beyond names),
-    its plan is appended (see ``measure_query``).
+    that times out, runs out of memory or crashes the worker.  Only the
+    first, cold compute is recorded.
     """
 
     def __init__(self, path: Path, query, config, tensors: "GraphTensors"):
@@ -276,7 +246,6 @@ class PlanRecorder:
 
         self.path = path
         self.recording = True
-        self.texts: list[str] = []
         path.parent.mkdir(parents=True, exist_ok=True)
         graph = tensors.graph
         lines = [
@@ -302,16 +271,7 @@ class PlanRecorder:
     def on_program(self, stage, program, bindings):
         if not self.recording:
             return
-        text = stage_text(stage, program, bindings)
-        self.texts.append(text)
-        self._write(text)
-
-    def append_timed_plan(self, texts: list[str]):
-        """Record the plan steps 2-3 timed, which differs from the first one."""
-        self._write(
-            "\n==== the timed run planned differently; its plan follows ====\n"
-            + "".join(texts)
-        )
+        self._write(stage_text(stage, program, bindings))
 
     def stop(self):
         self.recording = False
@@ -352,32 +312,19 @@ def measure_plan_only(
     if on_cold_done is not None:
         on_cold_done()
 
-    totals, stages, plan_same = [], {stage: [] for stage in STAGES}, True
-    for i in range(max(runs, 1)):
-        timed: list[str] = []
-        context = build_scheduler(
-            config, on_program=lambda *stage: timed.append(stage_text(*stage)),
-            plan_only=True,
-        )  # fmt: skip
+    totals, stages = [], {stage: [] for stage in STAGES}
+    for _ in range(max(runs, 1)):
+        context = build_scheduler(config, plan_only=True)
         _, elapsed = _run_once(query, tensors, context)
         totals.append(elapsed)
         for stage in STAGES:
             stages[stage].append(context.timer.times[stage])
-        if i == 0:
-            plan_same = recorder is None or normalize_plan(
-                "".join(recorder.texts)
-            ) == normalize_plan("".join(timed))
-            if not plan_same:
-                recorder.append_timed_plan(timed)
-            logic_order = describe_orders(context.captures.get("logic"), loop_order=False)
-            loop_order = describe_orders(context.captures.get("loop"), loop_order=True)
     return {
         "first_s": first_s,
         "plan_total_s": statistics.median(totals),
         **{f"{stage}_s": statistics.median(stages[stage]) for stage in STAGES},
-        "logic_order": logic_order,
-        "loop_order": loop_order,
-        "plan_same": plan_same,
+        "logic_order": describe_orders(context.captures.get("logic"), loop_order=False),
+        "loop_order": describe_orders(context.captures.get("loop"), loop_order=True),
     }
 
 
@@ -399,16 +346,8 @@ def measure_query(
     if on_cold_done is not None:
         on_cold_done()
 
-    timed: list[str] = []
-    context = build_scheduler(
-        config, on_program=lambda *stage: timed.append(stage_text(*stage))
-    )
+    context = build_scheduler(config)
     result, plan_total_s = _run_once(query, tensors, context)
-    plan_same = recorder is None or normalize_plan("".join(recorder.texts)) == (
-        normalize_plan("".join(timed))
-    )
-    if not plan_same:
-        recorder.append_timed_plan(timed)
     stage_times = dict(context.timer.times)
     logic_order = describe_orders(context.captures.get("logic"), loop_order=False)
     loop_order = describe_orders(context.captures.get("loop"), loop_order=True)
@@ -432,7 +371,6 @@ def measure_query(
         "exec_samples": ";".join(f"{s:.6g}" for s in samples),
         "logic_order": logic_order,
         "loop_order": loop_order,
-        "plan_same": plan_same,
     }
 
 
@@ -834,57 +772,7 @@ def run_config(args, config_name, queries, writer, csv_file):
     return rows
 
 
-def run_interleaved(args, config_names, queries, writer, csv_file):
-    """Run every (query, config) pair on ``args.jobs`` pinned CPUs, query by
-    query, so configs are measured at the same time under the same machine
-    load; the config order is rotated from one query to the next.  Each CPU
-    keeps one worker per config (idle ones hold their memory)."""
-    pending: queue.Queue = queue.Queue()
-    for i, query in enumerate(queries):
-        k = i % len(config_names)
-        for name in config_names[k:] + config_names[:k]:
-            pending.put((query, name))
-    rows: list[dict] = []
-    lock = threading.Lock()
-
-    def drain(cpu, folder):
-        slots = {name: WorkerSlot(args, name, cpu, folder) for name in config_names}
-        try:
-            while True:
-                try:
-                    query, name = pending.get_nowait()
-                except queue.Empty:
-                    return
-                record = slots[name].run(query)
-                row = _base_row(args.dataset, name, query, args.plan_dir)
-                row.update(record, cpu=cpu)
-                if args.plan_dir and "result" not in record:
-                    path = plan_path(args.plan_dir, name, query.name)
-                    if record["status"] in ("timeout", "crash") or (
-                        record["status"] == "oom" and "exit" in record.get("error", "")
-                    ):
-                        append_plan_status(path, record["status"], record["error"])
-                with lock:
-                    rows.append(row)
-                    writer.writerow(row)
-                    csv_file.flush()
-                    _print_row(row, name)
-        finally:
-            for slot in slots.values():
-                slot.close()
-
-    cpus = args.cpus[: args.jobs]
-    with (
-        tempfile.TemporaryDirectory(prefix="subgraph-workers-") as folder,
-        ThreadPoolExecutor(len(cpus)) as pool,
-    ):
-        futures = [pool.submit(drain, cpu, Path(folder)) for cpu in cpus]
-        for future in futures:
-            future.result()
-    return rows
-
-
-def _print_row(row, config=None):
+def _print_row(row):
     if row["status"] in ("ok", "wrong", "unchecked"):
         detail = (
             f"exec {row['exec_median_s']:.4g}s  plan {row['plan_total_s']:.4g}s  "
@@ -898,32 +786,7 @@ def _print_row(row, config=None):
         )
     else:
         detail = row.get("error", "")
-    where = f"[{config}] " if config else ""
-    print(f"  {row['status']:7} {where}{row['query']:22} {detail}", flush=True)
-
-
-def _geomean(values):
-    values = [v for v in values if v and v > 0]
-    return math.exp(statistics.fmean(map(math.log, values))) if values else float("nan")
-
-
-def print_summary(rows, config_names):
-    statuses = ("ok", "unchecked", "wrong", "timeout", "oom", "error", "crash")
-    if any(r["status"] == "planned" for r in rows):
-        statuses = ("planned", "timeout", "oom", "error", "crash")
-    header = "".join(f"{s:>10}" for s in statuses)
-    print(f"\n{'config':38}{header}  geomean exec  geomean plan  (ok + unchecked)")
-    for name in config_names:
-        mine = [r for r in rows if r["config"] == name]
-        ok = [r for r in mine if r["status"] in ("ok", "unchecked", "planned")]
-        counts = "".join(
-            f"{sum(r['status'] == s for r in mine):10}" for s in statuses
-        )
-        print(
-            f"{name:38}{counts}  "
-            f"{_geomean([r.get('exec_median_s') for r in ok]):11.4g}s  "
-            f"{_geomean([r['plan_total_s'] for r in ok]):11.4g}s"
-        )
+    print(f"  {row['status']:7} {row['query']:22} {detail}", flush=True)
 
 
 def main(argv=None):
@@ -965,12 +828,6 @@ def main(argv=None):
     )
     parser.add_argument(
         "--hash-seed", type=int, default=0, help="PYTHONHASHSEED for every worker"
-    )
-    parser.add_argument(
-        "--interleave",
-        action="store_true",
-        help="measure the configs query by query, at the same time, instead of "
-        "one config after another",
     )
     parser.add_argument(
         "--memory-limit-gb",
@@ -1063,14 +920,10 @@ def main(argv=None):
     with path.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=FIELDS, extrasaction="ignore")
         writer.writeheader()
-        if args.interleave:
-            print(f"\n[interleaved: {', '.join(config_names)}]", flush=True)
-            rows = run_interleaved(args, config_names, queries, writer, csv_file)
-        else:
-            for name in config_names:
-                print(f"\n[{name}]", flush=True)
-                rows += run_config(args, name, queries, writer, csv_file)
-    print_summary(rows, config_names)
+        for name in config_names:
+            print(f"\n[{name}]", flush=True)
+            rows += run_config(args, name, queries, writer, csv_file)
+    print_summary(rows)
     print(f"\nwrote {path}")
     if args.plan_dir:
         print(f"plans in {args.plan_dir}")
