@@ -42,7 +42,7 @@ pyinstrument = ">=5.1.3,<6"
 py-spy = ">=0.4.2,<0.5"
 
 [tool.pixi.pypi-dependencies]
-finch-tensor = { git = "https://github.com/finch-tensor/finch-tensor-lite.git", branch = "main", extras = ["julia"] }
+finch-tensor = { git = "https://github.com/finch-tensor/finch-tensor.git", branch = "main", extras = ["julia"] }
 ssgetpy = ">=1.0rc2"
 gdown = ">=5.2"
 
@@ -50,14 +50,136 @@ gdown = ">=5.2"
 pytest = ">=7.4.4"
 pytest-cov = "*"
 
+[tool.pixi.feature.galley.dependencies]
+python = ">=3.11,<3.14"
+numpy = "<2.4"
+scipy = "*"
+openssl = ">=3.5"
+
+[tool.pixi.feature.galley.pypi-dependencies]
+galley-jl-python = { git = "https://github.com/finch-tensor/galley-jl-python.git" }
+
+[tool.pixi.feature.galley.activation.env]
+PYTHONPATH = "src"
+JULIA_DEPOT_PATH = "$PIXI_PROJECT_ROOT/.pixi/galley-julia-depot:"
+GALLEY_JL_PYTHON_CACHE = "$PIXI_PROJECT_ROOT/.pixi/galley-cache"
+
+[tool.pixi.feature.galley.tasks]
+run-galley = "python src/finchtensorbench/benchmarks/scripts/run_galley.py"
+
+[tool.pixi.feature.scorch.dependencies]
+python = ">=3.11,<3.14"
+numpy = "*"
+scipy = "*"
+pytorch = ">=2.6"
+llvm-openmp = "*"
+ninja = "*"
+setuptools = "*"
+
+[tool.pixi.feature.scorch.pypi-dependencies]
+# Editable checkout (git submodule): scorch locates csrc/ by walking up to its setup.py.
+scorch = { path = "external/scorch", editable = true }
+
+# scorch's setup.py imports torch, so it must build against the env's torch.
+[tool.pixi.feature.scorch.pypi-options]
+no-build-isolation = ["scorch"]
+
+[tool.pixi.feature.scorch.activation.env]
+PYTHONPATH = "src"
+CC = "/usr/bin/clang"
+CXX = "/usr/bin/clang++"
+# Scorch JIT-compiles kernels with a hardcoded -isystem to the Command Line
+# Tools SDK's libc++; the C headers must come from that same SDK.
+SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
+# omp.h / libomp from conda-forge llvm-openmp.
+CPATH = "$CONDA_PREFIX/include"
+LIBRARY_PATH = "$CONDA_PREFIX/lib"
+
+[tool.pixi.feature.scorch.tasks]
+run-scorch = "python src/finchtensorbench/benchmarks/scripts/run_scorch.py"
+
+# SparseAuto (OOPSLA'24 artifact, doi:10.5281/zenodo.12764370). Git submodules
+# pinned to the artifact commits:
+#   external/sparseLNR        e359ea1516c0466c28bcbf44b502e28d01c730d7  (TACO fork)
+#   external/tensor-schedules d77d045f5d55eb2f1f5f8a62c5a380c4487ccf35  (auto-scheduler)
+# The artifact's own shell scripts expect sparseLNR as a sibling of
+# tensor-schedules; run_sparseauto.py uses explicit paths.
+[tool.pixi.feature.sparseauto.dependencies]
+cmake = ">=3.20,<4"
+make = "*"
+cxx-compiler = "*"
+llvm-openmp = "*"
+scipy = "*"
+numpy = "*"
+pandas = "*"
+matplotlib = "*"
+seaborn = "*"
+regex = "*"
+bitarray = "*"
+
+# Exact versions from tensor-schedules/requirements.txt, kept in their own
+# feature so the `global` env can combine SparseAuto with finch (numpy>=2).
+[tool.pixi.feature.sparseauto-pins.dependencies]
+python = "3.12.*"  # numpy 1.26 (artifact pin) has no 3.13 wheels
+numpy = "1.26.*"
+pandas = "2.2.*"
+matplotlib = "3.8.*"
+seaborn = "0.13.*"
+bitarray = "2.9.*"
+
+[tool.pixi.feature.sparseauto.pypi-dependencies]
+z3-solver = "==4.13.0.0"
+
+[tool.pixi.feature.sparseauto.activation.env]
+# tensor-schedules' modules are imported as the package `src` (e.g. src.file_storing).
+PYTHONPATH = "$PIXI_PROJECT_ROOT/src:$PIXI_PROJECT_ROOT/external/tensor-schedules"
+
+[tool.pixi.feature.sparseauto.tasks]
+# tests-workspaces.cpp includes the glibc-only <bits/types/clock_t.h>; swap in
+# <ctime> (a no-op once done). Extra flags go in the Release flags: sparseLNR's
+# CMakeLists overwrites CMAKE_CXX_FLAGS, and newer clang rejects a narrowing
+# conversion in its tests.
+build-sparseauto = """
+perl -pi -e 's|#include <bits/types/clock_t.h>|#include <ctime>|' external/sparseLNR/test/tests-workspaces.cpp \
+  && cmake -S external/sparseLNR -B external/sparseLNR/build -DCMAKE_BUILD_TYPE=Release \
+       "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -Wno-c++11-narrowing-const-reference" \
+  && cmake --build external/sparseLNR/build -j8 \
+  && sh external/tensor-schedules/create_folders.sh
+"""
+run-sparseauto = "python src/finchtensorbench/benchmarks/scripts/run_sparseauto.py"
+
 [tool.pixi.environments]
 test = { features = ["test"] }
+galley = { features = ["galley"], no-default-feature = true }
+scorch = { features = ["scorch"], no-default-feature = true }
+sparseauto = { features = ["sparseauto", "sparseauto-pins"], no-default-feature = true }
+# Everything in one env (for the IDE and for running any runner). numpy ends up
+# 2.3.x: finch needs >=2, galley needs <2.4. The per-backend envs above stay the
+# reference envs for benchmark runs.
+global = { features = ["global", "test", "galley", "scorch", "sparseauto"] }
+
+[tool.pixi.feature.global.dependencies]
+numba = ">=0.61,<0.63.1"  # galley-jl-python's range; conda would pick newer
+
+# Listed first in the `global` env: the first feature wins on conflicting vars.
+[tool.pixi.feature.global.activation.env]
+PYTHONPATH = "$PIXI_PROJECT_ROOT/src:$PIXI_PROJECT_ROOT/external/tensor-schedules"
+JULIA_DEPOT_PATH = "$PIXI_PROJECT_ROOT/.pixi/global-julia-depot:"
+GALLEY_JL_PYTHON_CACHE = "$PIXI_PROJECT_ROOT/.pixi/global-galley-cache"
+CC = "/usr/bin/clang"
+CXX = "/usr/bin/clang++"
+SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
+CPATH = "$CONDA_PREFIX/include"
+LIBRARY_PATH = "$CONDA_PREFIX/lib"
 
 [tool.pixi.activation.env]
 PYTHONPATH = "src"
+JULIA_DEPOT_PATH = "$PIXI_PROJECT_ROOT/.pixi/julia-depot:"
 
 [tool.pixi.tasks]
-uniform-stats = "python -m finchtensorbench.benchmarks.uniform_stats"
+run-finch = "python src/finchtensorbench/benchmarks/scripts/run_finch.py"
+run-finch-scheduler = "python src/finchtensorbench/benchmarks/scripts/util/run_finch_scheduler.py"
+run-all = "bash src/finchtensorbench/benchmarks/scripts/run_all.sh"
 
 [tool.pixi.feature.test.tasks]
 test = "pytest"

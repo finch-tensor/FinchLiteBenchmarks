@@ -1,0 +1,834 @@
+Scheduling report for outer: shared_k=1024, workspace insertion=disabled
+Pipeline: LogicNormalizer -> LogicExecutor -> GalleyLogicFactorizer -> LogicSimplify -> BFSLoopOrderer -> ReformatOnlyWorkspacer -> LogicFuseMerger -> GalleyFormatter -> LogicFillDropper -> CostProtocolizer -> CompilerFormLowerer -> LogicCompiler -> NotationGenerator -> FinchJLCompiler
+Costs below are planner estimates, not benchmark seconds. Search entries describe candidates actually visited; pruned branches are not expanded into complete plans.
+The Julia section is generated source before Julia's native compilation.
+
+[1] Paper SpGEMM dataset
+Operation: A @ B.T; base input shapes: (np.int64(4194304), np.int64(131072)), (np.int64(4194304), np.int64(131072)).
+Original artifact: https://github.com/finch-tensor/FinchBenchmarks/blob/32a89f4be661f609eea0cd2780689cfc1677aa5e/outer_transpose/make_outer_data.jl
+65536 active columns per input, 16 nonzeros per active column, 1024 shared columns.
+The gustavson/outer names identify the workspace-on/off experiment slots; the scheduler chooses the actual loop order and storage in both.
+
+[2] Workspace planning disabled
+Cost-based accumulator workspace insertion is disabled; cost-based input reformats remain enabled. Loop order remains the autoscheduler's choice.
+
+[3] Input to LogicNormalizer
+(no configurable options recorded)
+
+#A#60[#i#61, #i#62] = A[#i#61, #i#62]
+#A#65[#i#64, #i#63] = Reorder(#A#60[#i#63, #i#64], #i#64, #i#63)
+#A#66[#i#67, #i#68] = A_2[#i#67, #i#68]
+#A#71[#i#70, #i#69] = Reorder(#A#66[#i#69, #i#70], #i#70, #i#69)
+#A#1727[#i#1726, #i#1725] = Reorder(#A#71[#i#1725, #i#1726], #i#1726, #i#1725)
+#A#1731[#i#1728, #i#1729, #i#1730] = Reorder(#A#65[#i#1728, #i#1729], #i#1728, #i#1729, #i#1730)
+#A#1735[#i#1734, #i#1732, #i#1733] = Reorder(#A#1727[#i#1732, #i#1733], #i#1734, #i#1732, #i#1733)
+plan:
+#A#1741[#i#1736, #i#1737, #i#1738] = Reorder(MapJoin(mul, Reorder(#A#1731[#i#1736, #i#1737, #j#1739], #i#1736, #i#1737), Reorder(#A#1735[#j#1740, #i#1737, #i#1738], #i#1737, #i#1738)), #i#1736, #i#1737, #i#1738)
+#A#1745[#i#1742, #i#1744] = Aggregate(add, np.float64(0.0), #A#1741[#i#1742, #i#1743, #i#1744], #i#1743)
+plan:
+#A#1746[#i#1747, #i#1748] = #A#1745[#i#1747, #i#1748]
+return #A#1746
+
+
+Tensor bindings / storage formats:
+  A: shape=(np.int64(131072), np.int64(4194304)), FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_2: shape=(np.int64(131072), np.int64(4194304)), FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+
+[4] Input to LogicExecutor
+stats_factory=MemoStatsFactory(DCStatsFactory)
+cache=True
+
+A[i, i_2] = A_21[i, i_2]
+A_2[i_3, i_4] = Reorder(A[i_4, i_3], i_3, i_4)
+A_3[i_5, i_6] = A_22[i_5, i_6]
+A_4[i_7, i_8] = Reorder(A_3[i_8, i_7], i_7, i_8)
+A_5[i_9, i_10] = Reorder(A_4[i_10, i_9], i_9, i_10)
+A_6[i_11, i_12, i_13] = Reorder(A_2[i_11, i_12], i_11, i_12, i_13)
+A_7[i_14, i_15, i_16] = Reorder(A_5[i_15, i_16], i_14, i_15, i_16)
+plan:
+A_8[i_17, i_18, i_19] = Reorder(MapJoin(mul, Reorder(A_6[i_17, i_18, i_20], i_17, i_18), Reorder(A_7[i_21, i_18, i_19], i_18, i_19)), i_17, i_18, i_19)
+A_9[i_22, i_23] = Aggregate(add, np.float64(0.0), A_8[i_22, i_24, i_23], i_24)
+plan:
+A_10[i_25, i_26] = A_9[i_25, i_26]
+return A_10
+
+
+Tensor bindings / storage formats:
+  A_21: shape=(np.int64(131072), np.int64(4194304)), FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: shape=(np.int64(131072), np.int64(4194304)), FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+
+[5] Input to GalleyLogicFactorizer
+optimizer='bfs'
+use_components=True
+cost_model=FLOPS_COST_MODEL (upstream default): CostModel, basis=FlopsBasis; cost = 1 * iterations + 10 * outputs
+
+A[i, i_2] = A_21[i, i_2]
+A_2[i_3, i_4] = Reorder(A[i_4, i_3], i_3, i_4)
+A_3[i_5, i_6] = A_22[i_5, i_6]
+A_4[i_7, i_8] = Reorder(A_3[i_8, i_7], i_7, i_8)
+A_5[i_9, i_10] = Reorder(A_4[i_10, i_9], i_9, i_10)
+A_6[i_11, i_12, i_13] = Reorder(A_2[i_11, i_12], i_11, i_12, i_13)
+A_7[i_14, i_15, i_16] = Reorder(A_5[i_15, i_16], i_14, i_15, i_16)
+plan:
+A_8[i_17, i_18, i_19] = Reorder(MapJoin(mul, Reorder(A_6[i_17, i_18, i_20], i_17, i_18), Reorder(A_7[i_21, i_18, i_19], i_18, i_19)), i_17, i_18, i_19)
+A_9[i_22, i_23] = Aggregate(add, np.float64(0.0), A_8[i_22, i_24, i_23], i_24)
+plan:
+A_10[i_25, i_26] = A_9[i_25, i_26]
+return A_10
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+
+[6] Logical search configuration
+optimizer=bfs; use_components=True; greedy fallback at 10 reduction indices
+
+[7] Logical component strategy
+component=#i#1749; actual search=greedy bound followed by BFS branch-and-bound
+
+[8] Logical search started
+greedy (k=1); component=#i#1749
+
+[9] Logical reduction candidate
+order=#i#1749; step cost=184549376.0; total cost=184549376.0; incumbent/bound=inf; eligible for frontier
+
+[10] Logical search frontier
+#i#1749: cost=184549376.0; retained
+
+[11] Logical search selected
+order=#i#1749; estimated cost=184549376.0
+
+[12] Logical search started
+BFS branch-and-bound; component=#i#1749
+
+[13] Logical reduction candidate
+order=#i#1749; step cost=184549376.0; total cost=184549376.0; incumbent/bound=184549376.1845494; eligible for frontier
+
+[14] Logical search frontier
+#i#1749: cost=184549376.0; retained
+
+[15] Logical search selected
+order=#i#1749; estimated cost=184549376.0
+
+[16] Logical optimization completed
+order=#i#1749; estimated total cost=184549376.0
+
+[17] Input to LogicSimplify
+(no configurable options recorded)
+
+#A#1758[i_25, i_26] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[#i#1749, i_25], A_22[#i#1749, i_26]), #i#1749)
+A_10[i_25, i_26] = #A#1758[i_25, i_26]
+return A_10
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+#A#1758: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  cached non-fill cardinality estimate: 16777216
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+A_10: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+
+[18] Input to BFSLoopOrderer
+k=None (upstream default)
+cost_model=CostModel, basis=WithCopies; cost = 0 * iterations + 4.20249102909e-09 * operations + 7.05088642826e-09 * outputs + 1.26517744827e-10 * lookups + 2.04627517088e-12 * dense_iterations + 3.80113540203e-09 * class0.sequential_writes + 1.80898018935e-10 * class0.scatter_writes + 2.39457564225e-10 * class0.scattered_region + 0 * class0.distinct_outputs + 0 * class1.sequential_writes + 5.26126449104e-10 * class1.scatter_writes + 0 * class1.scattered_region + 1.36559855601e-08 * class1.distinct_outputs + 0.000152891911153 * constant
+
+#A#1758[i_25, i_26] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[#i#1749, i_25], A_22[#i#1749, i_26]), #i#1749)
+A_10[i_25, i_26] = #A#1758[i_25, i_26]
+return A_10
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+#A#1758: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  cached non-fill cardinality estimate: 16777216
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+A_10: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+
+[19] Loop-order search started
+BFS; k=None; output indices=i_25 -> i_26
+Expression: Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[gallop(#i#1749), gallop(i_25)], A_22[gallop(#i#1749), gallop(i_26)]), #i#1749)
+
+[20] Loop-order search started
+GREEDY; k=n/a; output indices=i_25 -> i_26
+Expression: Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[gallop(#i#1749), gallop(i_25)], A_22[gallop(#i#1749), gallop(i_26)]), #i#1749)
+
+[21] Greedy loop candidate
+prefix=#i#1749; estimated incremental cost=0.00016975145936421672
+
+[22] Greedy loop candidate
+prefix=i_25; estimated incremental cost=0.6029616183303808
+
+[23] Greedy loop candidate
+prefix=i_26; estimated incremental cost=0.5994330912309589
+
+[24] Greedy loop step selected
+prefix=#i#1749
+
+[25] Greedy loop candidate
+prefix=#i#1749 -> i_25; estimated incremental cost=0.5762566899557275
+
+[26] Greedy loop candidate
+prefix=#i#1749 -> i_26; estimated incremental cost=0.5630368128876796
+
+[27] Greedy loop step selected
+prefix=#i#1749 -> i_26
+
+[28] Greedy loop candidate
+prefix=#i#1749 -> i_26 -> i_25; estimated incremental cost=9.272266670774377
+
+[29] Greedy loop step selected
+prefix=#i#1749 -> i_26 -> i_25
+
+[30] Loop-order search selected
+strategy=greedy; order=#i#1749 -> i_26 -> i_25; estimated cost=see candidate incremental costs
+
+[31] Loop-order candidate
+strategy=bfs; prefix=#i#1749; estimated cumulative cost=0.11861688796896103; best complete cost=9.953920371631018; eligible for frontier or new complete order
+
+[32] Loop-order candidate
+strategy=bfs; prefix=i_25; estimated cumulative cost=0.7214087548399776; best complete cost=9.953920371631018; eligible for frontier or new complete order
+
+[33] Loop-order candidate
+strategy=bfs; prefix=i_26; estimated cumulative cost=0.7178802277405557; best complete cost=9.953920371631018; eligible for frontier or new complete order
+
+[34] Loop-order candidate
+strategy=bfs; prefix=#i#1749 -> i_25; estimated cumulative cost=0.6948735779246886; best complete cost=9.953920371631018; eligible for frontier or new complete order
+
+[35] Loop-order candidate
+strategy=bfs; prefix=#i#1749 -> i_26; estimated cumulative cost=0.6816537008566406; best complete cost=9.953920371631018; eligible for frontier or new complete order
+
+[36] Loop-order candidate
+strategy=bfs; prefix=i_25 -> #i#1749; estimated cumulative cost=0.9784327117413197; best complete cost=9.953920371631018; eligible for frontier or new complete order
+
+[37] Loop-order candidate
+strategy=bfs; prefix=i_25 -> i_26; estimated cumulative cost=3388.671348717917; best complete cost=9.953920371631018; pruned: cost reaches/exceeds best complete order
+
+[38] Loop-order candidate
+strategy=bfs; prefix=i_26 -> #i#1749; estimated cumulative cost=0.9748571602004844; best complete cost=9.953920371631018; eligible for frontier or new complete order
+
+[39] Loop-order candidate
+strategy=bfs; prefix=i_26 -> i_25; estimated cumulative cost=1023.7517532096663; best complete cost=9.953920371631018; pruned: cost reaches/exceeds best complete order
+
+[40] Loop-order candidate
+strategy=bfs; prefix=#i#1749 -> i_25 -> i_26; estimated cumulative cost=9.945646316769269; best complete cost=9.953920371631018; eligible for frontier or new complete order
+
+[41] Loop-order candidate
+strategy=bfs; prefix=#i#1749 -> i_26 -> i_25; estimated cumulative cost=9.953920371631018; best complete cost=9.945646316769269; pruned: cost reaches/exceeds best complete order
+
+[42] Loop-order candidate
+strategy=bfs; prefix=i_25 -> #i#1749 -> i_26; estimated cumulative cost=10.2292054505859; best complete cost=9.945646316769269; pruned: cost reaches/exceeds best complete order
+
+[43] Loop-order candidate
+strategy=bfs; prefix=i_26 -> #i#1749 -> i_25; estimated cumulative cost=10.24712383097486; best complete cost=9.945646316769269; pruned: cost reaches/exceeds best complete order
+
+[44] Loop-order search selected
+strategy=bfs; order=#i#1749 -> i_25 -> i_26; estimated cost=9.945646316769269
+
+[45] Input to ReformatOnlyWorkspacer
+cost_model=CostModel, basis=Affine; cost = 0 * dense.positions + 1e-09 * dense.slots + 0 * sparse_list.positions + 2.04212001855e-09 * sparse_list.entries + 8.72913498092e-10 * sparse_list.position_bytes + 9.98438068918e-10 * sparse_list.index_bytes + 0 * sparse_hash.positions + 8.3367558295e-08 * sparse_hash.entries + 8.79780799247e-10 * sparse_hash.position_bytes + 0 * sparse_hash.index_bytes + 0 * sparse_bytemap.positions + 1e-09 * sparse_bytemap.slots + 2.68205081708e-08 * sparse_bytemap.entries + 0 * sparse_bytemap.position_bytes + 0 * element.values + 3.5432208507e-10 * element.value_bytes + 3.28609484041e-09 * dense.follow.executions + 7.79595070846e-11 * dense.follow.iterations + 0 * dense.follow.visits + 3.35021941566e-09 * dense.follow.parents + 1.3295405615e-10 * dense.follow.distinct + 0 * dense.extrude.executions + 0 * dense.extrude.iterations + 0 * dense.extrude.visits + 0 * dense.extrude.parents + 2.2944883192e-09 * dense.extrude.distinct + 0 * dense.laminate.executions + 0 * dense.laminate.iterations + 0 * dense.laminate.visits + 8.67396194485e-09 * dense.laminate.parents + 0 * dense.laminate.distinct + 2.92735591474e-09 * sparse_list.walk.executions + 5.69837755276e-10 * sparse_list.walk.iterations + 4.52244022842e-10 * sparse_list.walk.visits + 0 * sparse_list.walk.parents + 9.12905702597e-11 * sparse_list.walk.distinct + 6.76832845997e-10 * sparse_list.gallop.executions + 6.8973220781e-10 * sparse_list.gallop.iterations + 2.21659182745e-09 * sparse_list.gallop.visits + 9.86895764918e-09 * sparse_list.gallop.parents + 2.82723728887e-10 * sparse_list.gallop.distinct + 9.34258062449e-09 * sparse_list.follow.executions + 5.35423725469e-09 * sparse_list.follow.iterations + 0 * sparse_list.follow.visits + 0 * sparse_list.follow.parents + 5.66455267306e-10 * sparse_list.follow.distinct + 0 * sparse_list.extrude.executions + 0 * sparse_list.extrude.iterations + 7.27036144196e-10 * sparse_list.extrude.visits + 0 * sparse_list.extrude.parents + 0 * sparse_list.extrude.distinct + 1.24882174181e-09 * sparse_hash.walk.executions + 1.95183139411e-09 * sparse_hash.walk.iterations + 2.1371994962e-10 * sparse_hash.walk.visits + 0 * sparse_hash.walk.parents + 4.59135303741e-10 * sparse_hash.walk.distinct + 0 * sparse_hash.follow.executions + 1.21088855756e-08 * sparse_hash.follow.iterations + 0 * sparse_hash.follow.visits + 7.55811974589e-08 * sparse_hash.follow.parents + 8.33173662451e-11 * sparse_hash.follow.distinct + 1.28116103924e-07 * sparse_hash.extrude.executions + 6.24857520802e-08 * sparse_hash.extrude.iterations + 0 * sparse_hash.extrude.visits + 0 * sparse_hash.extrude.parents + 0 * sparse_hash.extrude.distinct + 2.75569151716e-10 * sparse_hash.laminate.executions + 2.07663621499e-08 * sparse_hash.laminate.iterations + 0 * sparse_hash.laminate.visits + 0 * sparse_hash.laminate.parents + 1.86425732045e-07 * sparse_hash.laminate.distinct + 1.41082686144e-09 * sparse_bytemap.walk.executions + 4.99070895817e-10 * sparse_bytemap.walk.iterations + 8.32951811297e-10 * sparse_bytemap.walk.visits + 0 * sparse_bytemap.walk.parents + 2.23987079611e-10 * sparse_bytemap.walk.distinct + 2.67483628547e-09 * sparse_bytemap.gallop.executions + 0 * sparse_bytemap.gallop.iterations + 3.27787414962e-09 * sparse_bytemap.gallop.visits + 0 * sparse_bytemap.gallop.parents + 8.98897426364e-10 * sparse_bytemap.gallop.distinct + 4.62896536214e-10 * sparse_bytemap.follow.executions + 6.48838787936e-10 * sparse_bytemap.follow.iterations + 0 * sparse_bytemap.follow.visits + 6.51850149596e-09 * sparse_bytemap.follow.parents + 4.44588451445e-11 * sparse_bytemap.follow.distinct + 3.62838846122e-05 * sparse_bytemap.extrude.executions + 8.21460710744e-09 * sparse_bytemap.extrude.iterations + 0 * sparse_bytemap.extrude.visits + 0 * sparse_bytemap.extrude.parents + 0 * sparse_bytemap.extrude.distinct + 2.09897392229e-09 * sparse_bytemap.laminate.executions + 4.99613533869e-10 * sparse_bytemap.laminate.iterations + 0 * sparse_bytemap.laminate.visits + 9.30094892521e-08 * sparse_bytemap.laminate.parents + 1.96528501738e-08 * sparse_bytemap.laminate.distinct + 0 * element.follow.executions + 0 * element.follow.iterations + 0 * element.follow.visits + 0 * element.follow.parents + 0 * element.follow.distinct + 3.2181689953e-08 * element.extrude.executions + 0 * element.extrude.iterations + 0 * element.extrude.visits + 0 * element.extrude.parents + 0 * element.extrude.distinct + 0 * element.laminate.executions + 7.57978860023e-11 * element.laminate.iterations + 0 * element.laminate.visits + 0 * element.laminate.parents + 0 * element.laminate.distinct + 0.000133470854458 * constant
+format_cost=finch.autoschedule.workspacer.workspacer.galley_format_cost
+
+fuse(#i#1749):
+    fuse(i_25):
+        fuse(i_26):
+            #A#1758[i_25, i_26] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[#i#1749, i_25], A_22[#i#1749, i_26]), #i#1749)
+return #A#1758
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+#A#1758: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  cached non-fill cardinality estimate: 16777216
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+A_10: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+
+[46] Input to LogicFuseMerger
+(no configurable options recorded)
+
+fuse(#i#1749):
+    fuse(i_25):
+        fuse(i_26):
+            #A#1758[i_25, i_26] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[#i#1749, i_25], A_22[#i#1749, i_26]), #i#1749)
+return #A#1758
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+#A#1758: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  cached non-fill cardinality estimate: 16777216
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+A_10: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+
+[47] Input to GalleyFormatter
+(no configurable options recorded)
+
+fuse(#i#1749):
+    fuse(i_25):
+        fuse(i_26):
+            #A#1758[i_25, i_26] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[#i#1749, i_25], A_22[#i#1749, i_26]), #i#1749)
+return #A#1758
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+#A#1758: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  cached non-fill cardinality estimate: 16777216
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+A_10: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+
+[48] Input to LogicFillDropper
+(no configurable options recorded)
+
+fuse(#i#1749):
+    fuse(i_25):
+        fuse(i_26):
+            #A#1758[i_25, i_26] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[#i#1749, i_25], A_22[#i#1749, i_26]), #i#1749)
+return #A#1758
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#1758: FiberTensorFType(SparseByteMapLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+#A#1758: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  cached non-fill cardinality estimate: 16777216
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+A_10: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+
+[49] Input to CostProtocolizer
+cost_model=CostModel, basis=Affine; cost = 0 * dense.positions + 1e-09 * dense.slots + 0 * sparse_list.positions + 2.04212001855e-09 * sparse_list.entries + 8.72913498092e-10 * sparse_list.position_bytes + 9.98438068918e-10 * sparse_list.index_bytes + 0 * sparse_hash.positions + 8.3367558295e-08 * sparse_hash.entries + 8.79780799247e-10 * sparse_hash.position_bytes + 0 * sparse_hash.index_bytes + 0 * sparse_bytemap.positions + 1e-09 * sparse_bytemap.slots + 2.68205081708e-08 * sparse_bytemap.entries + 0 * sparse_bytemap.position_bytes + 0 * element.values + 3.5432208507e-10 * element.value_bytes + 3.28609484041e-09 * dense.follow.executions + 7.79595070846e-11 * dense.follow.iterations + 0 * dense.follow.visits + 3.35021941566e-09 * dense.follow.parents + 1.3295405615e-10 * dense.follow.distinct + 0 * dense.extrude.executions + 0 * dense.extrude.iterations + 0 * dense.extrude.visits + 0 * dense.extrude.parents + 2.2944883192e-09 * dense.extrude.distinct + 0 * dense.laminate.executions + 0 * dense.laminate.iterations + 0 * dense.laminate.visits + 8.67396194485e-09 * dense.laminate.parents + 0 * dense.laminate.distinct + 2.92735591474e-09 * sparse_list.walk.executions + 5.69837755276e-10 * sparse_list.walk.iterations + 4.52244022842e-10 * sparse_list.walk.visits + 0 * sparse_list.walk.parents + 9.12905702597e-11 * sparse_list.walk.distinct + 6.76832845997e-10 * sparse_list.gallop.executions + 6.8973220781e-10 * sparse_list.gallop.iterations + 2.21659182745e-09 * sparse_list.gallop.visits + 9.86895764918e-09 * sparse_list.gallop.parents + 2.82723728887e-10 * sparse_list.gallop.distinct + 9.34258062449e-09 * sparse_list.follow.executions + 5.35423725469e-09 * sparse_list.follow.iterations + 0 * sparse_list.follow.visits + 0 * sparse_list.follow.parents + 5.66455267306e-10 * sparse_list.follow.distinct + 0 * sparse_list.extrude.executions + 0 * sparse_list.extrude.iterations + 7.27036144196e-10 * sparse_list.extrude.visits + 0 * sparse_list.extrude.parents + 0 * sparse_list.extrude.distinct + 1.24882174181e-09 * sparse_hash.walk.executions + 1.95183139411e-09 * sparse_hash.walk.iterations + 2.1371994962e-10 * sparse_hash.walk.visits + 0 * sparse_hash.walk.parents + 4.59135303741e-10 * sparse_hash.walk.distinct + 0 * sparse_hash.follow.executions + 1.21088855756e-08 * sparse_hash.follow.iterations + 0 * sparse_hash.follow.visits + 7.55811974589e-08 * sparse_hash.follow.parents + 8.33173662451e-11 * sparse_hash.follow.distinct + 1.28116103924e-07 * sparse_hash.extrude.executions + 6.24857520802e-08 * sparse_hash.extrude.iterations + 0 * sparse_hash.extrude.visits + 0 * sparse_hash.extrude.parents + 0 * sparse_hash.extrude.distinct + 2.75569151716e-10 * sparse_hash.laminate.executions + 2.07663621499e-08 * sparse_hash.laminate.iterations + 0 * sparse_hash.laminate.visits + 0 * sparse_hash.laminate.parents + 1.86425732045e-07 * sparse_hash.laminate.distinct + 1.41082686144e-09 * sparse_bytemap.walk.executions + 4.99070895817e-10 * sparse_bytemap.walk.iterations + 8.32951811297e-10 * sparse_bytemap.walk.visits + 0 * sparse_bytemap.walk.parents + 2.23987079611e-10 * sparse_bytemap.walk.distinct + 2.67483628547e-09 * sparse_bytemap.gallop.executions + 0 * sparse_bytemap.gallop.iterations + 3.27787414962e-09 * sparse_bytemap.gallop.visits + 0 * sparse_bytemap.gallop.parents + 8.98897426364e-10 * sparse_bytemap.gallop.distinct + 4.62896536214e-10 * sparse_bytemap.follow.executions + 6.48838787936e-10 * sparse_bytemap.follow.iterations + 0 * sparse_bytemap.follow.visits + 6.51850149596e-09 * sparse_bytemap.follow.parents + 4.44588451445e-11 * sparse_bytemap.follow.distinct + 3.62838846122e-05 * sparse_bytemap.extrude.executions + 8.21460710744e-09 * sparse_bytemap.extrude.iterations + 0 * sparse_bytemap.extrude.visits + 0 * sparse_bytemap.extrude.parents + 0 * sparse_bytemap.extrude.distinct + 2.09897392229e-09 * sparse_bytemap.laminate.executions + 4.99613533869e-10 * sparse_bytemap.laminate.iterations + 0 * sparse_bytemap.laminate.visits + 9.30094892521e-08 * sparse_bytemap.laminate.parents + 1.96528501738e-08 * sparse_bytemap.laminate.distinct + 0 * element.follow.executions + 0 * element.follow.iterations + 0 * element.follow.visits + 0 * element.follow.parents + 0 * element.follow.distinct + 3.2181689953e-08 * element.extrude.executions + 0 * element.extrude.iterations + 0 * element.extrude.visits + 0 * element.extrude.parents + 0 * element.extrude.distinct + 0 * element.laminate.executions + 7.57978860023e-11 * element.laminate.iterations + 0 * element.laminate.visits + 0 * element.laminate.parents + 0 * element.laminate.distinct + 0.000133470854458 * constant
+
+fuse(#i#1749):
+    fuse(i_25):
+        fuse(i_26):
+            #A#1758[i_25, i_26] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[#i#1749, i_25], A_22[#i#1749, i_26]), #i#1749)
+return #A#1758
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#1758: FiberTensorFType(SparseByteMapLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+#A#1758: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  cached non-fill cardinality estimate: 16777216
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+A_10: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+
+[50] Input to CompilerFormLowerer
+(no configurable options recorded)
+
+fuse(#i#1749):
+    fuse(i_25):
+        fuse(i_26):
+            #A#1758[i_25, i_26] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[follow(#i#1749), walk(i_25)], A_22[follow(#i#1749), walk(i_26)]), #i#1749)
+return #A#1758
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#1758: FiberTensorFType(SparseByteMapLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+#A#1758: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  cached non-fill cardinality estimate: 16777216
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+A_10: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+
+[51] Input to LogicCompiler
+(no configurable options recorded)
+
+fuse(#i#1749):
+    fuse(i_25):
+        fuse(i_26):
+            #A#1758[i_25, i_26] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[follow(#i#1749), walk(i_25)], A_22[follow(#i#1749), walk(i_26)]), #i#1749)
+return #A#1758
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#1758: FiberTensorFType(SparseByteMapLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+#A#1758: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  cached non-fill cardinality estimate: 16777216
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+A_10: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+
+[52] Input to NotationGenerator
+(no configurable options recorded)
+
+fuse(#i#1749):
+    fuse(i_25):
+        fuse(i_26):
+            #A#1758[i_25, i_26] = Aggregate(add, np.float64(0.0), MapJoin(mul, A_21[follow(#i#1749), walk(i_25)], A_22[follow(#i#1749), walk(i_26)]), #i#1749)
+return #A#1758
+
+
+Tensor bindings / storage formats:
+  A_21: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  A_22: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0))))
+  #A#1758: FiberTensorFType(SparseByteMapLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))
+
+Planning statistics:
+A_21: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927666
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 5
+A_22: MemoStats, index_order=(d0, d1)
+  dimensions: d0=131072, d1=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1048576 (dense capacity and direct constraints)
+  distinct support tuples on {d0} <= 65536
+  distinct support tuples on {d0, d1} <= 1048576
+  distinct support tuples on {d1} <= 927496
+  max degree {d0, d1} given {d0} <= 16
+  max degree {d0, d1} given {d1} <= 6
+#A#1758: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  cached non-fill cardinality estimate: 16777216
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+A_10: MemoStats, index_order=(i_25, i_26)
+  dimensions: i_25=4194304, i_26=4194304; fill_type=StaticFillFType(np.float64(0.0))
+  non-fill cardinality upper bound <= 1.75921860444e+13 (dense capacity and direct constraints)
+  distinct support tuples on {#i#1749#2440} <= 65536
+  distinct support tuples on {#i#1749#2440, i_25} <= 1048576
+  distinct support tuples on {#i#1749#2440, i_26} <= 1048576
+  distinct support tuples on {i_25} <= 927666
+  distinct support tuples on {i_26} <= 927496
+  max degree {#i#1749#2440, i_25} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_26} given {#i#1749#2440} <= 16
+  max degree {#i#1749#2440, i_25} given {i_25} <= 5
+  max degree {#i#1749#2440, i_26} given {i_26} <= 6
+
+[53] Input to FinchJLCompiler
+(no configurable options recorded)
+
+def main(#A_21#1759: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))), #A_22#1763: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))), ##A#1758#1767: FiberTensorFType(SparseByteMapLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))) -> tuple(element_0: FiberTensorFType(SparseByteMapLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0))))):
+    #_A_21#1760: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))) = unpack(#A_21#1759)
+    #A_21_dim_0#1761: finch.int64 = #_A_21#1760.shape[0]
+    #A_21_dim_1#1762: finch.int64 = #_A_21#1760.shape[1]
+    #_A_22#1764: FiberTensorFType(DenseLevelFType(SparseListLevelFType(ElementLevelFType(fv=0.0)))) = unpack(#A_22#1763)
+    #A_22_dim_0#1765: finch.int64 = #_A_22#1764.shape[0]
+    #A_22_dim_1#1766: finch.int64 = #_A_22#1764.shape[1]
+    #_#A#1758#1768: FiberTensorFType(SparseByteMapLevelFType(SparseHashLevelFType(ElementLevelFType(fv=0.0)))) = unpack(##A#1758#1767)
+    ##A#1758_dim_0#1769: finch.int64 = #_#A#1758#1768.shape[0]
+    ##A#1758_dim_1#1770: finch.int64 = #_#A#1758#1768.shape[1]
+    ##A#1758_dim_0#1774: finch.int64 = #A_21_dim_1#1762
+    ##A#1758_dim_1#1775: finch.int64 = #A_22_dim_1#1766
+    declare(#_#A#1758#1768, 0.0, add, ['##A#1758_dim_0#1774', '##A#1758_dim_1#1775'])
+    loop(##i#1749#1771, make_extent(0, #A_21_dim_0#1761)):
+        loop(#i_25#1772, make_extent(0, #A_21_dim_1#1762)):
+            loop(#i_26#1773, make_extent(0, #A_22_dim_1#1766)):
+                increment(update(#_#A#1758#1768, ['laminate(#i_25#1772)', 'laminate(#i_26#1773)'], add), mul(unwrap(read(#_A_21#1760, ['follow(##i#1749#1771)', 'walk(#i_25#1772)'])), unwrap(read(#_A_22#1764, ['follow(##i#1749#1771)', 'walk(#i_26#1773)']))))
+    repack(#_A_21#1760, #A_21#1759)
+    repack(#_A_22#1764, #A_22#1763)
+    freeze(#_#A#1758#1768, add)
+    repack(#_#A#1758#1768, ##A#1758#1767)
+    return make_tuple(##A#1758#1767)
+
+
+[54] Generated Julia: main
+eval(let
+        v0 = Finch.Tensor(Finch.DenseLevel(Finch.SparseListLevel{Int64}(Finch.ElementLevel(0.0, FinchInterop.Buffer(Float64[])), 1, Finch.PlusOneVector(FinchInterop.Buffer(Int64[])), Finch.PlusOneVector(FinchInterop.Buffer(Int64[]))), 1))
+        v1 = Finch.Tensor(Finch.DenseLevel(Finch.SparseListLevel{Int64}(Finch.ElementLevel(0.0, FinchInterop.Buffer(Float64[])), 1, Finch.PlusOneVector(FinchInterop.Buffer(Int64[])), Finch.PlusOneVector(FinchInterop.Buffer(Int64[]))), 1))
+        v2 = Finch.Tensor(Finch.SparseByteMapLevel{Int64}(Finch.SparseHashLevel{Int64}(Finch.ElementLevel(0.0, FinchInterop.Buffer(Float64[])), 1, 1, Finch.SPARSE_HASH_POS_MULTIPLIER, Finch.PlusOneVector(FinchInterop.Buffer(Int64[])), FinchInterop.Buffer(UInt8[]), Finch.PlusOneVector(FinchInterop.Buffer(Int64[])), Finch.PlusOneVector(FinchInterop.Buffer(Tuple{Int64,Int64,UInt8}[]), (1, 2)), Finch.PlusOneVector(FinchInterop.Buffer(Int64[])), FinchInterop.Buffer(Int[0])), 1, Finch.PlusOneVector(FinchInterop.Buffer(Int64[])), FinchInterop.Buffer(Bool[]), Finch.PlusOneVector(FinchInterop.Buffer(Int64[]))))
+        v3 = 1
+        v4 = 1
+        v6 = 1
+    Finch.@finch_kernel function kernel_8b8bae48a4a74f67ac050d24e04a96eb(v0,v1,v2,v3,v4,v6)
+        v2 .= 0.0
+        for v11 = 1:v3
+            for v12 = 1:v4
+                for v13 = 1:v6
+                    v2[laminate(v13),laminate(v12)] += (v0[walk(v12),follow(v11)] * v1[walk(v13),follow(v11)])
+                end
+            end
+        end
+        return v2
+    end
+end)
