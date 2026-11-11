@@ -77,6 +77,14 @@ try:  # merges sibling Fuse nodes before formatting; not in every finch-tensor
     from finch.autoschedule.fuse_merger import LogicFuseMerger
 except ImportError:
     LogicFuseMerger = None
+try:  # reads repeated tensor accesses through scalars; not in every finch-tensor
+    from finch.autoschedule.cse_extractor import CSEExtractor
+except ImportError:
+    CSEExtractor = None
+try:  # accumulates fixed output entries in 0-d temporaries; not in every finch-tensor
+    from finch.autoschedule.workspacer import add_accumulators
+except ImportError:
+    add_accumulators = None
 from finch.compile_jl.compiler import FinchJLCompiler
 from finch.finch_logic import Aggregate, Fuse, LogicSimplify, Reorder
 
@@ -296,6 +304,10 @@ class _PartialWorkspacer(LogicWorkspacer):
             prgm = add_cost_effective_workspaces(prgm, *args)
         if self.reformats:
             prgm = add_cost_effective_reformats(prgm, *args)
+        if add_accumulators is not None and getattr(self, "accumulators", False):
+            # As LogicWorkspacer: last, accumulate in 0-d temporaries.
+            prgm, formats = add_accumulators(prgm, bindings)
+            bindings = {**bindings, **formats}
         return self.ctx(prgm, bindings, stats, stats_factory)
 
 
@@ -332,6 +344,9 @@ def build_scheduler(
             formatter = CostFormatter(protocolizer)
     else:
         formatter = DefaultLogicFormatter(lowerer)
+    if CSEExtractor is not None:
+        # As the default schedulers: share repeated reads after merging fuses.
+        formatter = CSEExtractor(formatter)
     if LogicFuseMerger is not None:
         # As the default schedulers: merge sibling fuses right before formatting.
         formatter = LogicFuseMerger(formatter)
