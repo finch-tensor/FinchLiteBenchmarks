@@ -103,7 +103,7 @@ def matrix_features(a, count):
     x = ft.defer(a)
     outputs = []
     for p in feature_matrix.POWERS[:count]:
-        powered = x if p == 1 else x ** ConstantScalar(np.float64(p))
+        powered = x if p == 1 else x ** ConstantScalar(np.int64(p))
         total = ft.sum(powered, axis=1)
         outputs.append(total if p == 1 else total ** ConstantScalar(np.float64(1.0 / p)))
     return ft.compute(tuple(outputs))

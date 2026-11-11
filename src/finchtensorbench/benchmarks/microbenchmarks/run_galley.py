@@ -95,7 +95,7 @@ def matrix_features(a, count):
     # Row Lp norms, p = 1..count. The values are nonnegative, so no abs is needed.
     outputs = []
     for p in feature_matrix.POWERS[:count]:
-        total = gl.sum(a if p == 1 else a ** float(p), axis=1)
+        total = gl.sum(a if p == 1 else a ** p, axis=1)
         outputs.append(total if p == 1 else total ** (1.0 / p))
     return tuple(outputs)
 
