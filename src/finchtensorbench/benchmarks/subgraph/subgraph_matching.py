@@ -6,6 +6,10 @@ matrices/vectors (see :mod:`finchtensorbench.gcare`) and evaluated with
 (:mod:`finchtensorbench.benchmarks.autoschedule`).  Every result is checked
 against the G-CARE ground-truth count.
 
+With ``--plan-only``, each query is only planned: once cold and then
+``--runs`` times with fresh schedulers, stopping where the finished plan would
+be compiled, so no kernel is compiled or run and no count is checked.
+
 Each configuration runs in its own worker process.  Per query the worker:
 
 1. ``first``: runs the query once with a fresh scheduler (cold: includes any
@@ -22,9 +26,8 @@ is recorded as a timeout and a new worker continues with the remaining queries.
 
 The plan saved for a query is the one steps 2-3 time; ``plan_same`` says
 whether step 1 planned the same (up to names).  Workers run with a fixed
-``PYTHONHASHSEED`` (``--hash-seed``), and the finch-tensor revision is checked
-at every worker start, so a campaign that sees finch change underneath it stops
-instead of mixing revisions (``--allow-revision-change`` to permit it).
+``PYTHONHASHSEED`` (``--hash-seed``), and every row records the installed
+finch-tensor revision.
 
 Run with::
 
@@ -176,11 +179,18 @@ def query_program(query: gcare.GCareQuery, tensors: GraphTensors):
 
 
 def _run_once(query, tensors, context):
+    """Compute *query*; return its count (None for a plan-only scheduler, which
+    stops before compiling) and the seconds it took."""
     import finch as fl
+
+    from finchtensorbench.benchmarks.autoschedule import PlanOnly
 
     context.timer.reset()
     started = time.perf_counter()
-    result = fl.compute(query_program(query, tensors), ctx=context)
+    try:
+        result = fl.compute(query_program(query, tensors), ctx=context)
+    except PlanOnly:
+        return None, time.perf_counter() - started
     elapsed = time.perf_counter() - started
     return float(np.asarray(fl.to_numpy(result)).ravel()[0]), elapsed
 
@@ -238,30 +248,10 @@ def plan_path(plan_dir: Path, config_name: str, query_name: str) -> Path:
 
 
 def _finch_revision() -> str:
-    """The finch actually imported: a git checkout's branch and commit (with
-    ``+dirty`` for uncommitted changes) when it is run from one, e.g. through
-    PYTHONPATH, else the installed distribution's recorded revision."""
+    """The installed finch-tensor's version and, for a git install, the
+    requested branch and commit."""
     from importlib import metadata
 
-    import finch
-
-    source = Path(finch.__file__ or ".").resolve().parent
-    try:
-        def git(where, *cmd):
-            return subprocess.run(
-                ["git", "-C", str(where), *cmd], capture_output=True, text=True,
-                check=True,
-            ).stdout.strip()  # fmt: skip
-
-        top = Path(git(source, "rev-parse", "--show-toplevel"))
-        if ".pixi" not in source.parts and source.is_relative_to(top):
-            dirty = "+dirty" if git(top, "status", "--porcelain", "--", "src") else ""
-            return (
-                f"{git(top, 'rev-parse', '--abbrev-ref', 'HEAD')} @ "
-                f"{git(top, 'rev-parse', '--short=10', 'HEAD')}{dirty} ({top})"
-            )
-    except (subprocess.CalledProcessError, OSError, ValueError):
-        pass
     try:
         dist = metadata.distribution("finch-tensor")
         info = json.loads(dist.read_text("direct_url.json") or "{}")
@@ -342,6 +332,55 @@ def append_plan_status(path: Path, status: str, error: str):
                        f"  error          {error}\n")  # fmt: skip
 
 
+def measure_plan_only(
+    query, tensors, config, runs, recorder: PlanRecorder | None = None,
+    on_cold_done=None,
+):  # fmt: skip
+    """Plan *query* without compiling or running it: once cold, then *runs*
+    times (at least once) with fresh schedulers, reporting the medians."""
+    from finchtensorbench.benchmarks.autoschedule import (
+        build_scheduler,
+        describe_orders,
+    )
+
+    on_program = recorder.on_program if recorder else None
+    _, first_s = _run_once(
+        query, tensors, build_scheduler(config, on_program=on_program, plan_only=True)
+    )
+    if recorder:
+        recorder.stop()
+    if on_cold_done is not None:
+        on_cold_done()
+
+    totals, stages, plan_same = [], {stage: [] for stage in STAGES}, True
+    for i in range(max(runs, 1)):
+        timed: list[str] = []
+        context = build_scheduler(
+            config, on_program=lambda *stage: timed.append(stage_text(*stage)),
+            plan_only=True,
+        )  # fmt: skip
+        _, elapsed = _run_once(query, tensors, context)
+        totals.append(elapsed)
+        for stage in STAGES:
+            stages[stage].append(context.timer.times[stage])
+        if i == 0:
+            plan_same = recorder is None or normalize_plan(
+                "".join(recorder.texts)
+            ) == normalize_plan("".join(timed))
+            if not plan_same:
+                recorder.append_timed_plan(timed)
+            logic_order = describe_orders(context.captures.get("logic"), loop_order=False)
+            loop_order = describe_orders(context.captures.get("loop"), loop_order=True)
+    return {
+        "first_s": first_s,
+        "plan_total_s": statistics.median(totals),
+        **{f"{stage}_s": statistics.median(stages[stage]) for stage in STAGES},
+        "logic_order": logic_order,
+        "loop_order": loop_order,
+        "plan_same": plan_same,
+    }
+
+
 def measure_query(
     query, tensors, config, runs, recorder: PlanRecorder | None = None,
     on_cold_done=None,
@@ -402,9 +441,10 @@ def _emit(file, record):
     file.flush()
 
 
-def warm_up(config):
-    """Run a tiny labelled path query so Julia start-up and Finch's generic
-    compilation happen before any timed (and time-limited) query."""
+def warm_up(config, plan_only=False):
+    """Run (or, with *plan_only*, plan) a tiny labelled path query so Julia
+    start-up and Finch's generic compilation happen before any timed (and
+    time-limited) query."""
     from finchtensorbench.benchmarks.autoschedule import build_scheduler
 
     graph = gcare.GCareGraph(
@@ -424,7 +464,7 @@ def warm_up(config):
             gcare.Operand("E0", (1, 2)),
         ),
     )
-    _run_once(query, GraphTensors(graph), build_scheduler(config))
+    _run_once(query, GraphTensors(graph), build_scheduler(config, plan_only=plan_only))
 
 
 def _stdin_lines():
@@ -455,12 +495,6 @@ def _stdin_lines():
 
 def run_worker(args):
     revision = _finch_revision()
-    expected = os.environ.get("FINCHBENCH_REVISION")
-    if expected and revision != expected:
-        raise RuntimeError(
-            f"finch-tensor changed during the campaign: started with {expected}, "
-            f"this worker imports {revision}"
-        )
     config = parse_config(args.config)
     graph = gcare.load_graph(args.dataset, args.data_dir)
     tensors = GraphTensors(graph)
@@ -470,7 +504,8 @@ def run_worker(args):
         queries = (by_name[name] for name in _stdin_lines() if name)
     else:
         queries = gcare.load_queries(graph, args.queries, args.data_dir)
-    warm_up(config)
+    warm_up(config, args.plan_only)
+    measure = measure_plan_only if args.plan_only else measure_query
     with args.worker_output.open("a", encoding="utf-8") as out:
         for query in queries:
             _emit(out, {"event": "start", "query": query.name, "time": time.time()})
@@ -479,14 +514,15 @@ def run_worker(args):
                 path = plan_path(args.plan_dir, args.config, query.name)
                 recorder = PlanRecorder(path, query, config, tensors)
             try:
-                record = measure_query(
+                record = measure(
                     query, tensors, config, args.runs, recorder,
                     on_cold_done=lambda name=query.name: _emit(
                         out, {"event": "cold", "query": name, "time": time.time()}
                     ),
                 )  # fmt: skip
                 record["status"] = (
-                    "ok" if record["correct"]
+                    "planned" if args.plan_only
+                    else "ok" if record["correct"]
                     else "wrong" if query.ground_truth is not None
                     else "unchecked"
                 )
@@ -632,6 +668,7 @@ class WorkerSlot:
             "--dataset", args.dataset,
             "--runs", str(args.runs),
             "--queries", "-",
+            *(["--plan-only"] if args.plan_only else []),
         ]  # fmt: skip
         if args.data_dir:
             command += ["--data-dir", str(args.data_dir)]
@@ -645,8 +682,6 @@ class WorkerSlot:
             env[var] = "1"
         # Set iteration order (and so plan tie-breaking) is fixed across workers.
         env["PYTHONHASHSEED"] = str(args.hash_seed)
-        if args.finch_revision:
-            env["FINCHBENCH_REVISION"] = args.finch_revision
         self.log_file = self.log.open("w")
         self.process = subprocess.Popen(
             command,
@@ -856,6 +891,11 @@ def _print_row(row, config=None):
             f"first {row['first_s']:.4g}s  count {row['result']:.0f} "
             f"(gt {row['ground_truth']})"
         )
+    elif row["status"] == "planned":
+        detail = (
+            f"plan {row['plan_total_s']:.4g}s  first {row['first_s']:.4g}s  "
+            f"loops {row['loop_order']}"
+        )
     else:
         detail = row.get("error", "")
     where = f"[{config}] " if config else ""
@@ -869,36 +909,21 @@ def _geomean(values):
 
 def print_summary(rows, config_names):
     statuses = ("ok", "unchecked", "wrong", "timeout", "oom", "error", "crash")
+    if any(r["status"] == "planned" for r in rows):
+        statuses = ("planned", "timeout", "oom", "error", "crash")
     header = "".join(f"{s:>10}" for s in statuses)
     print(f"\n{'config':38}{header}  geomean exec  geomean plan  (ok + unchecked)")
     for name in config_names:
         mine = [r for r in rows if r["config"] == name]
-        ok = [r for r in mine if r["status"] in ("ok", "unchecked")]
+        ok = [r for r in mine if r["status"] in ("ok", "unchecked", "planned")]
         counts = "".join(
             f"{sum(r['status'] == s for r in mine):10}" for s in statuses
         )
         print(
             f"{name:38}{counts}  "
-            f"{_geomean([r['exec_median_s'] for r in ok]):11.4g}s  "
+            f"{_geomean([r.get('exec_median_s') for r in ok]):11.4g}s  "
             f"{_geomean([r['plan_total_s'] for r in ok]):11.4g}s"
         )
-
-
-def _save_finch_diff(path: Path):
-    """Save finch-tensor's uncommitted changes, if any, next to the CSV."""
-    import finch
-
-    source = Path(finch.__file__ or ".").resolve().parent
-    try:
-        diff = subprocess.run(
-            ["git", "-C", str(source), "diff", "HEAD", "--", "."],
-            capture_output=True, text=True, check=True,
-        ).stdout  # fmt: skip
-    except (subprocess.CalledProcessError, OSError):
-        return
-    if diff:
-        path.write_text(diff)
-        print(f"finch-tensor's uncommitted changes saved to {path}")
 
 
 def main(argv=None):
@@ -917,6 +942,13 @@ def main(argv=None):
     )
     parser.add_argument("--sample-seed", type=int, default=0)
     parser.add_argument("--runs", type=int, default=5, help="timed cached executions")
+    parser.add_argument(
+        "--plan-only",
+        action="store_true",
+        help="only plan each query (stats through formats and protocols), "
+        "--runs times with fresh schedulers; nothing is compiled or run, and "
+        "rows get status 'planned'",
+    )
     parser.add_argument("--timeout", type=float, default=600.0, help="seconds per query")
     parser.add_argument(
         "--max-queries-per-worker",
@@ -939,16 +971,6 @@ def main(argv=None):
         action="store_true",
         help="measure the configs query by query, at the same time, instead of "
         "one config after another",
-    )
-    parser.add_argument(
-        "--allow-revision-change",
-        action="store_true",
-        help="don't stop if finch-tensor changes during the campaign",
-    )
-    parser.add_argument(
-        "--allow-dirty",
-        action="store_true",
-        help="run even if finch-tensor has uncommitted changes (saved as a diff)",
     )
     parser.add_argument(
         "--memory-limit-gb",
@@ -987,14 +1009,6 @@ def main(argv=None):
     if args.first_timeout is None:
         args.first_timeout = args.timeout
     args.cgroup_oom_kills = _cgroup_oom_kills()
-    args.finch_revision = _finch_revision()
-    if "+dirty" in args.finch_revision and not args.allow_dirty:
-        parser.error(
-            f"finch-tensor has uncommitted changes ({args.finch_revision}); commit "
-            "them, run from a frozen checkout, or pass --allow-dirty"
-        )
-    if args.allow_revision_change:
-        args.finch_revision = ""
     if args.cpus is None:
         args.cpus = default_cpus()
     if args.jobs < 1 or args.jobs > len(args.cpus):
@@ -1044,8 +1058,7 @@ def main(argv=None):
     args.plan_dir = (
         None if args.no_plans else args.output_dir / f"{args.dataset}_{stamp}_plans"
     )
-    print(f"finch-tensor {args.finch_revision or _finch_revision()}")
-    _save_finch_diff(path.with_suffix(".finch.diff"))
+    print(f"finch-tensor {_finch_revision()}")
     rows = []
     with path.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=FIELDS, extrasaction="ignore")

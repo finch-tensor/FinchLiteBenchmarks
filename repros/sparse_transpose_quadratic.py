@@ -1,70 +1,25 @@
-"""Repro: transposing a sparse matrix costs O(n^2) instead of O(nnz).
+"""Check that transposing a sparse matrix costs O(nnz), not O(n^2).
 
-Status: FIXED on finch-tensor-lite ``kbd/workspace-loop-orderer`` @ 00869086
-("Loop copies in the order of their argument"): copies now walk their source
-and scatter into a ``Dense(SparseHash)`` output, e.g.
-``A_3[i_5, i_6] = A_7[follow(i_6), walk(i_5)]``, and every case below scales
-linearly (<= 2.1x per doubling).  Kept as a regression test; the text below
-describes the bug as found.
-
-Base: finch-tensor-lite branch ``kbd/workspace-loop-orderer`` @ 8f51a7d2
-(Finch.jl 2.1.x).  Same behaviour on ``main`` @ d53438cb.
-
-Problem
--------
 Any program that needs a sparse matrix in the other storage order --
 ``permute_dims(A, (1, 0))``, or reading CSR column-first as in
-``einsum("ij,kj->", A, A)`` -- materializes a transposed copy, and that copy is
-lowered as a *gather* over the whole index space:
+``einsum("ij,kj->", A, A)`` -- materializes a transposed copy.  That copy
+should walk the source's stored entries and scatter into an output that
+accepts unordered inserts, e.g. ``A_3[i_5, i_6] = A_7[follow(i_6), walk(i_5)]``
+into ``Dense(SparseHash)``.  Lowered as a gather over the whole index space
+instead (``follow`` on both loops), it is O(n^2): about 4x slower per doubling
+of n, which on G-CARE AIDS (n = 254,156) dominates every query.
 
-    fuse(i_1):
-        fuse(i_0):
-            A_T[i_1, i_0] = A[follow(i_0), follow(i_1)]
+Each case is run under ``COMPILE_JULIA_GALLEY`` and ``COMPILE_JULIA`` on random
+CSR matrices with 2 nonzeros per row at n = 5k, 10k and 20k, timing the
+execution of a cached plan.  The script exits 0 when every result matches
+scipy and the time ratio per doubling of n stays below 3 (linear is ~2).
 
-Both loops run over the full extent ``n`` and every iteration does a random
-``follow`` lookup into the sparse source, so the kernel is O(n^2) although
-``A`` has O(n) nonzeros.  It is not a format problem: the input is CSR
-(``Dense(SparseList(Element))``) and the chosen output formats are sparse too.
+    python repros/sparse_transpose_quadratic.py         # scaling check
+    python repros/sparse_transpose_quadratic.py --plan  # print each case's plan
 
-Measured on ``main`` @ d53438cb with 2 nonzeros per row (execution of a cached
-plan; compilation excluded), time grows ~4x per doubling of n:
-
-    permute_dims, COMPILE_JULIA_GALLEY   n=5k 0.145s  10k 0.62s  20k 2.89s
-    einsum ij,kj->, COMPILE_JULIA_GALLEY n=5k 0.105s  10k 0.54s  20k 2.60s  40k 10.0s
-    einsum ij,kj->, COMPILE_JULIA        n=10k 2.26s  20k 8.63s
-
-Impact: G-CARE AIDS subgraph-counting queries (n = 254,156, ~550k edges) take
-~11 minutes, nearly all of it in these transpose kernels.
-
-Where it comes from (src/finch/autoschedule/loop_orderer/loop_ordering.py)
--------------------------------------------------------------------------
-* ``concordize`` (line 44, called at line 317) makes every discordant Table
-  read a transposed copy of its tensor.
-* ``with_copy_loop_orders`` (line 148, called at line 325) gives each copy the
-  loop order of its *left-hand side* ("A copy may read its argument in another
-  order, representing a transpose").  For a transpose that is precisely the
-  order the source cannot be iterated in: neither source level can be walked,
-  the protocolizer can only pick ``follow`` for both, and nothing sparse
-  bounds either loop.  ``permute_dims`` goes through the same copy path.
-
-Goal
-----
-A sparse transpose / discordant copy should cost O(nnz + n), e.g. by looping
-in the *source's* storage order (walking its stored entries) and writing out of
-order into an output level that accepts unordered inserts (hash / COO /
-bytemap, converted afterwards if needed), or by a dedicated transpose lowering.
-Results must stay exact and existing tests must pass.
-
-Acceptance
-----------
-``python repros/sparse_transpose_quadratic.py`` exits 0: every case matches
-scipy and the time ratio per doubling of n stays below 3 (it is ~4-5 today;
-linear would be ~2).  ``--plan`` prints the program and formats handed to the
-compiler for the smallest case, to check that the transpose kernel now walks
-the source.
-
-Run with finch-tensor[julia] installed; the first compute pays about a minute
-of Julia start-up and JIT, which is excluded from the timings.
+``--plan`` prints the program and formats handed to the compiler at n = 1000,
+to see how the transpose is lowered.  Needs finch-tensor[julia]; the first
+compute pays about a minute of Julia start-up, which is not timed.
 """
 
 from __future__ import annotations

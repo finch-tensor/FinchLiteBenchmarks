@@ -1,7 +1,6 @@
 """Downloader and parsers for the G-CARE subgraph-matching benchmark.
 
-Ported from the SparseArrayProgrammingSuite (``saps.downloaders.gcare``) so
-this repository is self contained.  The data graph becomes one sparse 0/1
+The data graph becomes one sparse 0/1
 matrix per edge label (``E{label}``) and one sparse 0/1 vector per vertex label
 (``V{label}``).  A query graph becomes one einsum: an index per query vertex,
 an ``E`` operand per query edge, a ``V`` operand per labelled query vertex, and
@@ -26,7 +25,7 @@ import numpy as np
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "gcare"
 
-# (Google Drive link, sha256) for each archive, as pinned in SAPS.
+# (Google Drive link, sha256) for each archive.
 _ARCHIVES = {
     "dataset": (
         "https://drive.google.com/file/d/1HAgSVE-24NOap6_Q1_twH56Dkb2kPvGU/view?usp=sharing",
@@ -356,7 +355,7 @@ class GCareQuery:
         return sorted({op.tensor for op in self.operands})
 
     def saps_expr(self) -> str:
-        """The SAPS/einop spelling, e.g. ``S[] += V3[v_0] * E0[v_0,v_1]``."""
+        """The einop-style spelling, e.g. ``S[] += V3[v_0] * E0[v_0,v_1]``."""
         terms = [
             f"{op.tensor}[{','.join(f'v_{v}' for v in op.vertices)}]"
             for op in self.operands
@@ -439,8 +438,8 @@ def load_queries(
 ) -> list[GCareQuery]:
     """Parse the queries of *graph*'s dataset, with their ground-truth counts.
 
-    Ground truth is matched by the query's relative path.  (SAPS matched by
-    file stem, but stems such as ``uf_Q_1_1`` repeat across query families.)
+    Ground truth is matched by the query's relative path, not its file stem:
+    stems such as ``uf_Q_1_1`` repeat across query families.
     """
     if graph.name in SGM_DATASETS:
         root = ensure_sgm_downloaded(graph.name, root)

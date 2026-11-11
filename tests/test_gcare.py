@@ -1,6 +1,5 @@
-"""Tests for the ported G-CARE parsers, using the toy graph from SAPS's
-``SubgraphMatchingTestGenerator`` (label A on vertices 0 and 2, label B on
-vertex 1, edges 0->1, 0->2, 2->1)."""
+"""Tests for the G-CARE parsers on a toy graph (label A on vertices 0 and 2,
+label B on vertex 1, edges 0->1, 0->2, 2->1)."""
 
 import numpy as np
 import pytest
@@ -16,7 +15,7 @@ e 0 2 0
 e 2 1 0
 """
 
-# name -> (query file, expected count from SAPS)
+# name -> (query file, expected count)
 QUERIES = {
     "all_edges": ("t # 0\nv 0 -1 -1\nv 1 -1 -1\ne 0 1 0\n", 3),
     "label_a_count": ("t # 0\nv 0 10 -1\n", 2),

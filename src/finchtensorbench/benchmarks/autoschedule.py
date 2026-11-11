@@ -1,8 +1,6 @@
 """Configurable Finch schedulers with per-stage timers.
 
-Ported from the ``autoscheduler-benchmarks`` branch and updated for
-finch-tensor-lite ``kbd/workspace-loop-orderer``.  A scheduler is assembled
-from these choices:
+A scheduler is assembled from these choices:
 
 * logic: ``default`` (DefaultLogicFactorizer) or ``galley-{greedy,bfs,dfs}``
 * loop: ``default``, ``greedy``, ``bfs`` or ``dfs`` loop orderer
@@ -28,7 +26,7 @@ time excludes the downstream stages it invokes:
 * ``logic_s``: logical (join/aggregate) optimization, plus LogicSimplify
 * ``loop_s``: loop ordering
 * ``workspace_s``: workspace insertion (0 when there is no workspacer)
-* ``lower_s``: merging sibling fuses (where finch has LogicFuseMerger),
+* ``lower_s``: merging sibling fuses (if finch has LogicFuseMerger),
   formatting, protocol selection, code generation and, on a kernel-cache
   miss, Julia compilation
 """
@@ -39,6 +37,7 @@ import time
 from dataclasses import dataclass
 
 from finch.autoschedule.compiler import CompilerFormLowerer, LogicCompiler
+from finch.autoschedule.drop_fills import LogicFillDropper
 from finch.autoschedule.executor import LogicExecutor
 from finch.autoschedule.factorizer.galley_factorizer.galley_optimize import (
     GalleyLogicFactorizer,
@@ -58,26 +57,6 @@ from finch.autoschedule.loop_orderer.loop_order_greedy import GreedyLoopOrderer
 from finch.autoschedule.loop_orderer.loop_ordering import DefaultLoopOrderer
 from finch.autoschedule.normalize import LogicNormalizer
 from finch.autoschedule.protocolizer import CostProtocolizer
-
-try:  # wma/dropfill: drop the fills of aggregates over dense loops
-    from finch.autoschedule.drop_fills import LogicFillDropper
-except ImportError:  # finch-tensor without drop_fills
-    LogicFillDropper = None
-from finch.autoschedule.workspacer import LogicWorkspacer
-from finch.autoschedule.workspacer.workspacer import (
-    add_cost_effective_reformats,
-    add_cost_effective_workspaces,
-)
-
-try:  # finch-tensor kbd/subgraph-fixes: price workspaces with Galley's formats
-    from finch.autoschedule.workspacer import galley_format_cost
-except ImportError:  # older finch-tensor
-    galley_format_cost = None
-
-try:  # kbd/merge-sibling-fuses: merge sibling Fuse nodes before formatting
-    from finch.autoschedule.fuse_merger import LogicFuseMerger
-except ImportError:  # finch-tensor without the fuse merger
-    LogicFuseMerger = None
 from finch.autoschedule.tensor_stats import (
     BlockedUniformStatsFactory,
     DCStatsFactory,
@@ -85,13 +64,19 @@ from finch.autoschedule.tensor_stats import (
     LPStatsFactory,
     SamplingStatsFactory,
     UniformStatsFactory,
+    VPStatsFactory,
 )
 from finch.autoschedule.tensor_stats.memo_stats import MemoStatsFactory
+from finch.autoschedule.workspacer import LogicWorkspacer, galley_format_cost
+from finch.autoschedule.workspacer.workspacer import (
+    add_cost_effective_reformats,
+    add_cost_effective_workspaces,
+)
 
-try:  # value-propagation statistics
-    from finch.autoschedule.tensor_stats import VPStatsFactory
-except ImportError:  # finch-tensor without vp_stats
-    VPStatsFactory = None
+try:  # merges sibling Fuse nodes before formatting; not in every finch-tensor
+    from finch.autoschedule.fuse_merger import LogicFuseMerger
+except ImportError:
+    LogicFuseMerger = None
 from finch.compile_jl.compiler import FinchJLCompiler
 from finch.finch_logic import Aggregate, Fuse, LogicSimplify, Reorder
 
@@ -111,7 +96,6 @@ STATS = {
     # defaults: sample_nnz=10_000, estimator="sh3"
     "sampling": lambda: MemoStatsFactory(SamplingStatsFactory()),
     "fd": FDStatsFactory,
-    # value propagation (VPStatsFactory)
     "vp": lambda: MemoStatsFactory(VPStatsFactory()),
     "uniform": UniformStatsFactory,
     # blocked uniform: a 5x5 grid of block nnz counts (block_count=5,
@@ -266,6 +250,17 @@ class _CaptureStage:
         return getattr(self.inner, name)
 
 
+class PlanOnly(Exception):
+    """Raised in place of compiling a plan, by a ``plan_only`` scheduler."""
+
+
+class _StopBeforeCompile:
+    """Stand-in for the compiler: planning is done once the plan reaches it."""
+
+    def __call__(self, *args):
+        raise PlanOnly
+
+
 class _TimedExecutor(LogicExecutor):
     """Charge input-statistics computation (and cache lookup) to ``stats``."""
 
@@ -304,8 +299,13 @@ class _PartialWorkspacer(LogicWorkspacer):
         return self.ctx(prgm, bindings, stats, stats_factory)
 
 
-def build_scheduler(config: SchedulerConfig, cache: bool = True, on_program=None):
+def build_scheduler(
+    config: SchedulerConfig, cache: bool = True, on_program=None, plan_only=False
+):
     """Assemble a scheduler; ``ctx.timer`` and ``ctx.captures`` expose timings.
+
+    With ``plan_only``, nothing is compiled or run: the finished plan (formats
+    and protocols chosen) raises :class:`PlanOnly` where it would be compiled.
 
     ``on_program(stage, program, bindings)``, if given, sees the program
     entering each stage of :data:`PLAN_STAGES` (``workspace`` only when the
@@ -316,14 +316,16 @@ def build_scheduler(config: SchedulerConfig, cache: bool = True, on_program=None
     def tap(inner, slot):
         return _CaptureStage(inner, slot, captures, on_program)
 
-    lowerer = tap(CompilerFormLowerer(LogicCompiler(FinchJLCompiler())), "compiler")
+    compiler = (
+        _StopBeforeCompile() if plan_only
+        else CompilerFormLowerer(LogicCompiler(FinchJLCompiler()))
+    )  # fmt: skip
+    lowerer = tap(compiler, "compiler")
     if config.formatter == "fd":
         formatter = FDFormatter(lowerer)
     elif config.formatter in ("galley", "cost"):
-        protocolizer = CostProtocolizer(lowerer)
-        if LogicFillDropper is not None:
-            # As COMPILE_JULIA_GALLEY: drop fills between formats and protocols.
-            protocolizer = LogicFillDropper(protocolizer)
+        # As COMPILE_JULIA_GALLEY: drop fills between formats and protocols.
+        protocolizer = LogicFillDropper(CostProtocolizer(lowerer))
         if config.formatter == "galley":
             formatter = GalleyFormatter(protocolizer)
         else:
@@ -336,10 +338,10 @@ def build_scheduler(config: SchedulerConfig, cache: bool = True, on_program=None
     formatter = _TimedStage(formatter, timer, "lower")
     if config.workspace:
         formatter = tap(formatter, "workspace")
-        # Like COMPILE_JULIA_GALLEY, price workspaces with the formats the
-        # formatter downstream chooses, where finch can.
+        # As COMPILE_JULIA_GALLEY: price workspaces with the formats the
+        # Galley formatter downstream chooses.
         options = {}
-        if config.formatter == "galley" and galley_format_cost is not None:
+        if config.formatter == "galley":
             options["format_cost"] = galley_format_cost
         workspacer = _PartialWorkspacer(
             formatter,

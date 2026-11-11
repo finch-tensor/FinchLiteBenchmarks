@@ -6,8 +6,10 @@
 One panel per runtime (cached-plan execution, fresh plan + execution, first
 call); within a panel, one group per query family plus "All", one box per
 scheduler config.  Boxes span the quartiles, whiskers reach 1.5 IQR, and every
-query is drawn as a dot.  Only queries that finished with the correct count
-are plotted; the rest are counted in the panel's footnote.  Several CSVs (e.g.
+query is drawn as a dot.  By default only queries that finished with the
+correct count are plotted and the rest are counted in the panel's footnote;
+``--cap`` draws failures at a time cap instead, and ``--paired`` keeps only
+queries every config got right.  Several CSVs (e.g.
 finch and Galley.jl on one dataset) are drawn together.  Writes
 ``<first csv stem>_boxplot.png`` next to the first CSV unless ``--out`` is given.
 """
@@ -31,7 +33,7 @@ from matplotlib.ticker import (  # noqa: E402
     NullFormatter,
 )
 
-# Reference categorical palette (dataviz skill), fixed slot order.
+# Categorical palette, one colour per config in order.
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
 SURFACE, TEXT, TEXT_2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
 
