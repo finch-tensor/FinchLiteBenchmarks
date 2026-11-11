@@ -11,7 +11,7 @@ import finch as ft
 from finch.autoschedule import COMPILE_JULIA_GALLEY
 from finch.tensor.scalar import ConstantScalar
 
-from finchtensorbench.benchmarks.scripts.util import paper_spgemm
+from finchtensorbench.benchmarks.scripts.util import feature_matrix, paper_spgemm
 from finchtensorbench.benchmarks.scripts.util.scheduler_trace import (
     capture_scheduler,
     configured_scheduler,
@@ -94,23 +94,21 @@ def spgemm_cases():
 ######################### Matrix Features ##########################
 
 def matrix_features(a, count):
+    # Row Lp norms, p = 1..count. The values are nonnegative, so no abs is needed.
     x = ft.defer(a)
-    denominator = ConstantScalar(np.float64(a.shape[1]))
-    mean = ft.sum(x, axis=1) / denominator
-    outputs = [mean]
-    if count >= 2:
-        centered = x - ft.expand_dims(mean, axis=1)
-        variance = ft.sum(centered * centered, axis=1) / denominator
-        outputs.append(variance ** ConstantScalar(np.float64(0.5)))
-    if count >= 3:
-        outputs.append(ft.max(x, axis=1))
-    if count >= 4:
-        outputs.append(ft.min(x, axis=1))
+    outputs = []
+    for p in feature_matrix.POWERS[:count]:
+        powered = x if p == 1 else x ** ConstantScalar(np.float64(p))
+        total = ft.sum(powered, axis=1)
+        outputs.append(total if p == 1 else total ** ConstantScalar(np.float64(1.0 / p)))
     return ft.compute(tuple(outputs))
 
 
 def matrix_feature_cases():
-    a = ft.asarray(np.random.default_rng(SEED).random((ROWS, COLS)))
+    matrix = feature_matrix.make_matrix()
+    matrix.indices = matrix.indices.astype(np.intp)
+    matrix.indptr = matrix.indptr.astype(np.intp)
+    a = ft.asarray(matrix)
     return [(f"features_{count}", (a, count)) for count in (1, 2, 3, 4)]
 
 
@@ -166,7 +164,7 @@ def cases():
         for name in ("gustavson", "outer"):
             results.append((name, spgemm, inputs, shared_k))
     for name, inputs in matrix_feature_cases():
-        results.append((name, matrix_features, inputs, 1.0))
+        results.append((name, matrix_features, inputs, feature_matrix.DENSITY))
     return results
 
 

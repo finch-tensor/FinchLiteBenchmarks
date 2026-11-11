@@ -10,7 +10,7 @@ import torch
 
 import scorch
 
-from finchtensorbench.benchmarks.scripts.util import paper_spgemm
+from finchtensorbench.benchmarks.scripts.util import feature_matrix, paper_spgemm
 
 ROWS = 5000
 COLS = 5000
@@ -98,25 +98,43 @@ def spgemm_cases(dtype):
 
 ######################### Matrix Features ##########################
 
-def matrix_features(a, ones, count):
-    n = a.shape[1]
-    total = scorch.einsum("ij,j->i", a, ones, format="d").to_torch()
-    mean = total / n
-    outputs = [mean]
-    if count >= 2:
-        squares = scorch.einsum("ij,ij->i", a, a, format="d").to_torch()
-        outputs.append(torch.sqrt(squares / n - mean * mean))
-    if count >= 3:
-        outputs.append(torch.amax(a.to_torch(in_place=False), dim=1))
-    if count >= 4:
-        outputs.append(torch.amin(a.to_torch(in_place=False), dim=1))
+# Row Lp norms, p = 1..count. The values are nonnegative, so |x|^p = x^p. Scorch has no
+# pow or root, so each version finishes with a PyTorch root on the length-R row sums.
+
+def lp_root(total, p):
+    total = total.to_torch()
+    return total if p == 1 else total ** (1.0 / p)
+
+
+def matrix_features_pow(powered, ones, count):
+    """Version 1: the inputs carry x^p, precomputed on the stored values; Scorch sums rows."""
+    return tuple(lp_root(scorch.einsum("ij,j->i", powered[p], ones, format="d"), p)
+                 for p in feature_matrix.POWERS[:count])
+
+
+def matrix_features_einsum(a, ones, count):
+    """Version 2: Scorch computes sum_j x_ij^p as a p-way product einsum."""
+    outputs = []
+    for p in feature_matrix.POWERS[:count]:
+        if p == 1:
+            total = scorch.einsum("ij,j->i", a, ones, format="d")
+        else:
+            total = scorch.einsum(",".join(["ij"] * p) + "->i", *([a] * p), format="d")
+        outputs.append(lp_root(total, p))
     return tuple(outputs)
 
 
 def matrix_feature_cases(dtype):
-    a = to_scorch_dense(np.random.default_rng(SEED).random((ROWS, COLS)), "A", dtype)
-    ones = to_scorch_dense(np.ones(COLS), "x", dtype)
-    return [(f"features_{count}", (a, ones, count)) for count in (1, 2, 3, 4)]
+    matrix = feature_matrix.make_matrix()
+    ones = to_scorch_dense(np.ones(matrix.shape[1]), "x", dtype)
+    a = to_scorch_csr(matrix, "A", dtype)
+    powered = {p: to_scorch_csr(matrix.power(p), f"A{p}", dtype) for p in feature_matrix.POWERS}
+    results = []
+    for count in range(1, len(feature_matrix.POWERS) + 1):
+        name = f"features_{count}"
+        results.append((name, matrix_features_pow, (powered, ones, count), "pow on values"))
+        results.append((name, matrix_features_einsum, (a, ones, count), "einsum product"))
+    return results
 
 
 ######################### Main ##########################
@@ -129,11 +147,11 @@ def cases(dtype):
     results = []
     for name, (function, make_cases) in benchmarks.items():
         for inputs, density in make_cases(dtype):
-            results.append((name, function, inputs, density))
+            results.append((name, function, inputs, density, ""))
     for inputs, shared_k in spgemm_cases(dtype):
-        results.append(("spgemm", spgemm, inputs, shared_k))
-    for name, inputs in matrix_feature_cases(dtype):
-        results.append((name, matrix_features, inputs, 1.0))
+        results.append(("spgemm", spgemm, inputs, shared_k, ""))
+    for name, function, inputs, implementation in matrix_feature_cases(dtype):
+        results.append((name, function, inputs, feature_matrix.DENSITY, implementation))
     return results
 
 
@@ -144,12 +162,14 @@ def run(argv=None):
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="") as output:
         writer = csv.writer(output)
-        writer.writerow(("benchmark", "density", "active_k", "repeat", "seconds"))
-        for name, function, inputs, parameter in cases(torch.float32):
+        writer.writerow(("benchmark", "density", "active_k", "repeat", "seconds", "implementation"))
+        for name, function, inputs, parameter, implementation in cases(torch.float32):
             is_spgemm = name == "spgemm"
             density = "" if is_spgemm else parameter
             active_k = parameter if is_spgemm else ""
             label = f"active_k={active_k}" if is_spgemm else f"density={density:.6g}"
+            if implementation:
+                label += f", {implementation}"
             print(f"Warming {name}: {label}", flush=True)
             function(*inputs)
             samples = []
@@ -159,7 +179,7 @@ def run(argv=None):
                 result = function(*inputs)
                 seconds = time.perf_counter() - start
                 del result
-                writer.writerow((name, density, active_k, trial, seconds))
+                writer.writerow((name, density, active_k, trial, seconds, implementation))
                 output.flush()
                 samples.append(seconds)
             median = float(np.median(samples))

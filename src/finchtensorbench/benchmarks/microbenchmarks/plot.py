@@ -15,7 +15,7 @@ PLOTS = {
     "sddmm": ("SDDMM", "Mask density"),
     "chain": ("Matrix chain ABC", "C density"),
     "spgemm": ("Sparse matrix multiply", "Shared active k-indices"),
-    "matrix_features": ("Matrix row features", "Number of features per row"),
+    "matrix_features": ("Row Lp norms (50k x 50k CSR, 1% dense)", "Norms per row"),
 }
 COLORS = {
     "Finch": "#2563eb",
@@ -87,7 +87,7 @@ def draw_plot(axis, family, series, colors):
                       linestyle="--" if outer else "-", markersize=5)
 
     if family == "matrix_features":
-        axis.set_xticks(range(4), ("1\nMean", "2\n+ std dev", "3\n+ max", "4\n+ min"))
+        axis.set_xticks(range(4), ("1\nL1", "2\n+ L2", "3\n+ L3", "4\n+ L4"))
         axis.set_ylim(bottom=0)
         axis.grid(axis="y", alpha=0.2)
     else:

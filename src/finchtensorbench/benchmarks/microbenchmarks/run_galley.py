@@ -10,7 +10,7 @@ import scipy.sparse as sps
 import galley_jl_python as gl
 from galley_jl_python.julia import jl
 
-from finchtensorbench.benchmarks.scripts.util import paper_spgemm
+from finchtensorbench.benchmarks.scripts.util import feature_matrix, paper_spgemm
 
 ROWS = 5000
 COLS = 5000
@@ -87,22 +87,19 @@ def spgemm_cases():
 
 @gl.compiled()
 def matrix_features(a, count):
-    denominator = float(a.shape[1])
-    mean = gl.sum(a, axis=1) / denominator
-    outputs = [mean]
-    if count >= 2:
-        centered = a - gl.expand_dims(mean, axis=1)
-        variance = gl.sum(centered * centered, axis=1) / denominator
-        outputs.append(gl.sqrt(variance))
-    if count >= 3:
-        outputs.append(gl.max(a, axis=1))
-    if count >= 4:
-        outputs.append(gl.min(a, axis=1))
+    # Row Lp norms, p = 1..count. The values are nonnegative, so no abs is needed.
+    outputs = []
+    for p in feature_matrix.POWERS[:count]:
+        total = gl.sum(a if p == 1 else a ** float(p), axis=1)
+        outputs.append(total if p == 1 else total ** (1.0 / p))
     return tuple(outputs)
 
 
 def matrix_feature_cases():
-    a = gl.asarray(np.random.default_rng(SEED).random((ROWS, COLS)))
+    matrix = feature_matrix.make_matrix()
+    matrix.indices = matrix.indices.astype(np.intp)
+    matrix.indptr = matrix.indptr.astype(np.intp)
+    a = gl.asarray(matrix)
     return [(f"features_{count}", (a, count)) for count in (1, 2, 3, 4)]
 
 
@@ -120,7 +117,7 @@ def cases():
     for inputs, shared_k in spgemm_cases():
         results.append(("spgemm", spgemm, inputs, shared_k))
     for name, inputs in matrix_feature_cases():
-        results.append((name, matrix_features, inputs, 1.0))
+        results.append((name, matrix_features, inputs, feature_matrix.DENSITY))
     return results
 
 

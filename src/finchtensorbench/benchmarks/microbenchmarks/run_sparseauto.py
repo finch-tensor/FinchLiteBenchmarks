@@ -18,7 +18,7 @@ from src.file_storing import read_baskets_from_json
 from src.generate_taco_schedule import UnfusedConfigToTacoVisitor
 from src.main_run_test_modified import ALLOWED_ELEMENT_SIZE
 
-from finchtensorbench.benchmarks.scripts.util import paper_spgemm
+from finchtensorbench.benchmarks.scripts.util import feature_matrix, paper_spgemm
 
 ROOT = Path(os.environ["PIXI_PROJECT_ROOT"])
 SCHEDULER = ROOT / "external/tensor-schedules"
@@ -129,13 +129,6 @@ void time_kernels(std::vector<std::pair<Tensor<double>, IndexStmt>> kernels,
   report_sum(outputs);
 }
 
-struct MaxReduce {
-  ir::Expr operator()(const std::vector<ir::Expr>& v) { return ir::Max::make(v[0], v[1]); }
-};
-
-struct MinReduce {
-  ir::Expr operator()(const std::vector<ir::Expr>& v) { return ir::Min::make(v[0], v[1]); }
-};
 }  // namespace
 """
 
@@ -291,19 +284,14 @@ def spgemm_benchmark(directory):
 ######################### Matrix Features ##########################
 
 FEATURES_TEST = r"""
-// Per-row mean, (centered) std dev, max, min of a dense matrix; FINCHBENCH_COUNT of them.
+// Row Lp norms of a CSR matrix (TENSOR_FILE), p = 1..FINCHBENCH_COUNT. The values are
+// nonnegative, so sum_j x^p is a p-way product of X with itself, then a root per row.
 TEST(finchbench, features) {
   setup_threads();
-  int R = std::stoi(util::getFromEnv("FINCHBENCH_ROWS", "1000"));
-  int N = std::stoi(util::getFromEnv("FINCHBENCH_COLS", "1000"));
   int count = std::stoi(util::getFromEnv("FINCHBENCH_COUNT", "1"));
-  Tensor<double> X("X", {R, N}, Format{Dense, Dense});
-  for (int r = 0; r < R; r++) for (int c = 0; c < N; c++) X.insert({r, c}, fill(r, c));
-  X.pack();
+  Tensor<double> X = read_csr(util::getFromEnv("TENSOR_FILE", ""), "X");
+  int R = X.getDimension(0);
   IndexVar i("i"), j("j");
-  IndexExpr inv_n = 1.0 / N;
-  Func row_max("max", MaxReduce(), {Identity(Literal(-INFINITY))});
-  Func row_min("min", MinReduce(), {Identity(Literal(INFINITY))});
 
   std::vector<std::pair<Tensor<double>, IndexStmt>> kernels;
   std::vector<Tensor<double>> outputs;
@@ -311,24 +299,17 @@ TEST(finchbench, features) {
     kernels.push_back({t, t.getAssignment().concretize()});
     if (output) outputs.push_back(t);
   };
-  Tensor<double> mean("mean", {R}, Format{Dense});
-  mean(i) = X(i, j) * inv_n;
-  add(mean, true);
-  Tensor<double> var("var", {R}, Format{Dense}), sd("sd", {R}, Format{Dense});
-  Tensor<double> mx("mx", {R}, Format{Dense}), mn("mn", {R}, Format{Dense});
-  if (count >= 2) {
-    var(i) = sum(j, (X(i, j) - mean(i)) * (X(i, j) - mean(i)) * inv_n);
-    sd(i) = sqrt(var(i));
-    add(var, false);
-    add(sd, true);
-  }
-  if (count >= 3) {
-    mx(i) = Reduction(row_max(), j, X(i, j));
-    add(mx, true);
-  }
-  if (count >= 4) {
-    mn(i) = Reduction(row_min(), j, X(i, j));
-    add(mn, true);
+  for (int p = 1; p <= count; p++) {
+    Tensor<double> total("total" + std::to_string(p), {R}, Format{Dense});
+    IndexExpr power = X(i, j);
+    for (int q = 1; q < p; q++) power = power * X(i, j);
+    total(i) = power;
+    add(total, p == 1);
+    if (p > 1) {
+      Tensor<double> norm("norm" + std::to_string(p), {R}, Format{Dense});
+      norm(i) = pow(total(i), Literal(1.0 / p));
+      add(norm, true);
+    }
   }
   time_kernels(kernels, outputs);
 }
@@ -336,10 +317,11 @@ TEST(finchbench, features) {
 
 
 def matrix_feature_benchmark(directory):
-    x = dense_fill(ROWS, COLS)
-    features = (x.mean(axis=1), x.std(axis=1), x.max(axis=1), x.min(axis=1))
+    x = feature_matrix.make_matrix()
+    features = feature_matrix.reference_norms(x)
+    path = write_mtx(directory, "features", x)
     return [("features", count, {
-        "env": {"FINCHBENCH_ROWS": str(ROWS), "FINCHBENCH_COLS": str(COLS), "FINCHBENCH_COUNT": str(count)},
+        "env": {"TENSOR_FILE": path, "FINCHBENCH_COUNT": str(count)},
         "expected": float(sum(f.sum() for f in features[:count])),
     }) for count in (1, 2, 3, 4)]
 
@@ -463,7 +445,8 @@ def run(argv=None):
                           flush=True)
             for test, parameter, samples in fixed_benchmarks(directory):
                 if test == "features":
-                    name, row, label = f"features_{parameter}", (1.0, ""), "density=1"
+                    name, row = f"features_{parameter}", (feature_matrix.DENSITY, "")
+                    label = f"density={feature_matrix.DENSITY:g}"
                 else:
                     name, row, label = test, ("", parameter), f"active_k={parameter}"
                 for trial, seconds in enumerate(samples):
