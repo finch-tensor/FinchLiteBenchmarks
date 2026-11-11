@@ -28,6 +28,11 @@ TEST_FILE = TACO / "test/tests-finchbench.cpp"
 
 ROWS = 5000
 COLS = 5000
+SDDMM_ROWS = 10000  # SDDMM uses larger matrices than chain matmul
+SDDMM_COLS = 10000
+SDDMM_DENSITIES = (0.00001, 0.0001, 0.001, 0.01)
+CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
+CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
 THREADS = int(os.environ.get("THREADS", "1"))  # >1 also makes SparseAuto emit parallel schedules
 TRIALS = 5
@@ -170,21 +175,22 @@ TEST(finchbench, sddmm) {
 
 def sddmm_benchmark(directory):
     k = 128
-    c, d = dense_fill(ROWS, k), dense_fill(k, COLS)
+    rows, cols = SDDMM_ROWS, SDDMM_COLS
+    c, d = dense_fill(rows, k), dense_fill(k, cols)
     cases = []
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0):
-        mask = random_csr((ROWS, COLS), density, SEED + 2)
+    for density in SDDMM_DENSITIES:
+        mask = random_csr((rows, cols), density, SEED + 2)
         cases.append({
-            "density": mask.nnz / (ROWS * COLS),
+            "density": mask.nnz / (rows * cols),
             "env": {"TENSOR_FILE": write_mtx(directory, f"sddmm_{density:g}", mask),
                     "FINCHBENCH_K": str(k)},
-            "actual": {"i": ROWS, "j": COLS, "k": k, "jpos": pos(mask)},
-            "expected": float((mask.toarray() * (c @ d)).sum()),
+            "actual": {"i": rows, "j": cols, "k": k, "jpos": pos(mask)},
+            "expected": float(mask.multiply(c @ d).sum()),
         })
     config = {
         "accesses": {"A": ["i", "j"], "B": ["i", "j"], "C": ["i", "k"], "D": ["k", "j"]},
         "tensor_idx_order_constraints": {"B": [["j", "i"]]},
-        "z3_constraints": exact({"i": ROWS, "j": COLS, "k": k}) + ["jpos >= 1", "jpos <= j"],
+        "z3_constraints": exact({"i": rows, "j": cols, "k": k}) + ["jpos >= 1", "jpos <= j"],
     }
     return config, cases
 
@@ -223,13 +229,13 @@ TEST(finchbench, chain) {
 
 def chain_benchmark(directory):
     n = ROWS
-    b = random_csr((ROWS, COLS), 0.1, SEED)
-    c = random_csr((ROWS, COLS), 0.1, SEED + 1)
+    b = random_csr((ROWS, COLS), CHAIN_AB_DENSITY, SEED)
+    c = random_csr((ROWS, COLS), CHAIN_AB_DENSITY, SEED + 1)
     env = {"FINCHBENCH_B": write_mtx(directory, "chain_B", b),
            "FINCHBENCH_C": write_mtx(directory, "chain_C", c)}
     bc = b @ c
     cases = []
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1):
+    for density in CHAIN_DENSITIES:
         d = random_csr((ROWS, COLS), density, SEED + 2)
         cases.append({
             "density": d.nnz / (ROWS * COLS),

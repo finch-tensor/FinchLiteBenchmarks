@@ -14,6 +14,11 @@ from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, pap
 
 ROWS = 5000
 COLS = 5000
+SDDMM_ROWS = 10000  # SDDMM uses larger matrices than chain matmul
+SDDMM_COLS = 10000
+SDDMM_DENSITIES = (0.00001, 0.0001, 0.001, 0.01)
+CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
+CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
 
 
@@ -43,10 +48,10 @@ def sddmm_inputs(k, mask, seed):
 
 def sddmm_cases():
     results = []
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0):
-        mask = random_csr((ROWS, COLS), density, SEED + 2)
+    for density in SDDMM_DENSITIES:
+        mask = random_csr((SDDMM_ROWS, SDDMM_COLS), density, SEED + 2)
         b, c, mask_galley = sddmm_inputs(128, mask, SEED)
-        results.append(((mask_galley, b, c), mask.nnz / (ROWS * COLS)))
+        results.append(((mask_galley, b, c), mask.nnz / (SDDMM_ROWS * SDDMM_COLS)))
     return results
 
 
@@ -59,9 +64,9 @@ def matmul(a, b, c):
 def chain_cases():
     results = []
     shape = (ROWS, COLS)
-    a = gl.asarray(random_csr(shape, 0.1, SEED))
-    b = gl.asarray(random_csr(shape, 0.1, SEED + 1))
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1):
+    a = gl.asarray(random_csr(shape, CHAIN_AB_DENSITY, SEED))
+    b = gl.asarray(random_csr(shape, CHAIN_AB_DENSITY, SEED + 1))
+    for density in CHAIN_DENSITIES:
         c = random_csr(shape, density, SEED + 2)
         results.append(((a, b, gl.asarray(c)), c.nnz / (ROWS * COLS)))
     return results
