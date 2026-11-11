@@ -416,12 +416,6 @@ def parse_query(
     )
 
 
-def _read_ground_truth(path: Path) -> int | None:
-    if not path.exists():
-        return None
-    return int(path.read_text().split()[0])
-
-
 def list_queries(dataset: str, root: str | Path | None = None) -> list[str]:
     """Query names (e.g. ``Star_3/uf_Q_0_1``) available for *dataset*, sorted."""
     if dataset in SGM_DATASETS:
@@ -450,16 +444,17 @@ def load_queries(
         truth_root = root / "ground_truth" / graph.name
         parse = parse_query
     names = list_queries(graph.name, root) if names is None else names
-    return [
-        parse(
+    queries = []
+    for name in names:
+        truth = truth_root / f"{name}.txt"
+        queries.append(parse(
             query_root / f"{name}.txt",
             continuous_ids=graph.continuous_ids,
             dataset=graph.name,
             name=name,
-            ground_truth=_read_ground_truth(truth_root / f"{name}.txt"),
-        )
-        for name in names
-    ]
+            ground_truth=int(truth.read_text().split()[0]) if truth.exists() else None,
+        ))  # fmt: skip
+    return queries
 
 
 def query_tensor_coo(

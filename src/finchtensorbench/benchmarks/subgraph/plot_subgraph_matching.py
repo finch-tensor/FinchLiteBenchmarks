@@ -56,11 +56,6 @@ MAX_FAMILY_GROUPS = 8
 MAX_WIDTH_IN = 18
 
 
-def _family_key(family):
-    shape, _, size = family.partition("_")
-    return (shape, int(size) if size.isdigit() else 0)
-
-
 def plot(paths, out=None, paired=False, palette=None, cap=None):
     rows = [row for path in paths for row in read_rows(path)]
     configs = list(dict.fromkeys(r["config"] for r in rows))
@@ -86,7 +81,12 @@ def plot(paths, out=None, paired=False, palette=None, cap=None):
         dropped = len(set(family) - common)
         rows = [r for r in rows if (r["dataset"], r["query"]) in common
                 or r["status"] not in DONE]
-    families = sorted({r["family"] for r in rows}, key=_family_key)
+    # Order families by shape, then size (Chain_3 before Chain_12).
+    families = sorted(
+        {r["family"] for r in rows},
+        key=lambda f: (f.partition("_")[0],
+                       int(f.partition("_")[2]) if f.partition("_")[2].isdigit() else 0),
+    )  # fmt: skip
     # Many families (e.g. AIDS: Chain_3 ... Tree_12) are grouped by shape.
     by_shape = len(families) > MAX_FAMILY_GROUPS
 

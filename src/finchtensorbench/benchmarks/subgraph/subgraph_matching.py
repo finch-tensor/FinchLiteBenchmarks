@@ -101,52 +101,6 @@ FIELDS = (
 # ---------------------------------------------------------------------------
 
 
-def _element_level(values):
-    import finch as fl
-
-    dtype = np.float64
-    return fl.ElementLevel(
-        fl.element(dtype(0), fl.ftype(dtype), fl.ftype(np.intp), fl.NumpyBufferFType),
-        fl.NumpyBuffer(np.asarray(values, dtype=dtype)),
-    )
-
-
-def sparse_vector(indices: np.ndarray, n: int):
-    """0/1 vector of length *n* as ``SparseList(Element)``."""
-    import finch as fl
-
-    idx = np.unique(indices).astype(np.intp)
-    return fl.FiberTensor(
-        fl.SparseListLevel(
-            _element_level(np.ones(len(idx))),
-            np.intp(n),
-            fl.NumpyBuffer(np.asarray([0, len(idx)], dtype=np.intp)),
-            fl.NumpyBuffer(idx),
-        )
-    )
-
-
-def sparse_matrix(rows: np.ndarray, cols: np.ndarray, n: int):
-    """0/1 ``n x n`` matrix in CSR, i.e. ``Dense(SparseList(Element))``."""
-    import finch as fl
-
-    csr = sps.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n))
-    csr.sum_duplicates()
-    csr.data[:] = 1.0
-    csr.sort_indices()
-    return fl.FiberTensor(
-        fl.DenseLevel(
-            fl.SparseListLevel(
-                _element_level(csr.data),
-                np.intp(n),
-                fl.NumpyBuffer(csr.indptr.astype(np.intp)),
-                fl.NumpyBuffer(csr.indices.astype(np.intp)),
-            ),
-            np.intp(n),
-        )
-    )
-
-
 class GraphTensors:
     """Lazily converted, shared Finch tensors for one data graph."""
 
@@ -155,11 +109,34 @@ class GraphTensors:
         self._tensors: dict[str, object] = {}
 
     def __getitem__(self, name: str):
+        """Graph tensor *name* as 0/1 ``SparseList(Element)`` (a vector) or CSR
+        ``Dense(SparseList(Element))`` (a matrix), converted on first use."""
+        import finch as fl
+
         if name not in self._tensors:
             ndim, coords = gcare.query_tensor_coo(self.graph, name)
             n = self.graph.num_vertices
-            self._tensors[name] = (
-                sparse_vector(coords[0], n) if ndim == 1 else sparse_matrix(*coords, n)
+            # A vector is built as the single row of a 1 x n CSR matrix.
+            cols = coords[-1]
+            rows = coords[0] if ndim == 2 else np.zeros_like(cols)
+            csr = sps.csr_matrix(
+                (np.ones(len(cols)), (rows, cols)), shape=(n if ndim == 2 else 1, n)
+            )
+            csr.sum_duplicates()
+            csr.data[:] = 1.0
+            csr.sort_indices()
+            f64 = np.float64
+            level = fl.SparseListLevel(
+                fl.ElementLevel(
+                    fl.element(f64(0), fl.ftype(f64), fl.ftype(np.intp), fl.NumpyBufferFType),
+                    fl.NumpyBuffer(csr.data.astype(f64)),
+                ),
+                np.intp(n),
+                fl.NumpyBuffer(csr.indptr.astype(np.intp)),
+                fl.NumpyBuffer(csr.indices.astype(np.intp)),
+            )
+            self._tensors[name] = fl.FiberTensor(
+                level if ndim == 1 else fl.DenseLevel(level, np.intp(n))
             )
         return self._tensors[name]
 
@@ -194,25 +171,6 @@ def _run_once(query, tensors, context):
     return float(np.asarray(fl.to_numpy(result)).ravel()[0]), elapsed
 
 
-def counts_match(result: float, ground_truth) -> bool:
-    """Whether *result* (finch's float64 count) is *ground_truth*, to float64
-    precision: counts above 2**53 cannot be represented exactly, so both are
-    rounded to float64 before comparing."""
-    return ground_truth is not None and float(result) == float(ground_truth)
-
-
-def stage_text(stage, program, bindings) -> str:
-    """How a plan file shows the program entering *stage*."""
-    from finchtensorbench.benchmarks.autoschedule import PLAN_STAGES
-
-    text = f"\n==== {PLAN_STAGES.get(stage, stage)} ====\n{program}\n"
-    if stage == "compiler":
-        text += "\nformats:\n" + "".join(
-            f"  {str(alias):16} {ftype}\n" for alias, ftype in bindings.items()
-        )
-    return text
-
-
 def plan_path(plan_dir: Path, config_name: str, query_name: str) -> Path:
     """Where the plan of *query_name* under *config_name* is saved."""
     return plan_dir / config_name.replace("/", "+") / f"{query_name}.txt"
@@ -237,15 +195,14 @@ class PlanRecorder:
     """Write a query's plan to a text file as the scheduler produces it.
 
     Each stage is flushed as soon as it is seen, so the plan survives a kernel
-    that times out, runs out of memory or crashes the worker.  Only the
-    first, cold compute is recorded.
+    that times out, runs out of memory or crashes the worker.  It is given to
+    the first, cold compute only.
     """
 
     def __init__(self, path: Path, query, config, tensors: "GraphTensors"):
         from finchtensorbench.benchmarks.autoschedule import config_label
 
         self.path = path
-        self.recording = True
         path.parent.mkdir(parents=True, exist_ok=True)
         graph = tensors.graph
         lines = [
@@ -269,33 +226,32 @@ class PlanRecorder:
             file.write(text)
 
     def on_program(self, stage, program, bindings):
-        if not self.recording:
-            return
-        self._write(stage_text(stage, program, bindings))
+        """Write the program entering *stage* (and, at the compiler, its formats)."""
+        from finchtensorbench.benchmarks.autoschedule import PLAN_STAGES
 
-    def stop(self):
-        self.recording = False
-
-    def append_record(self, record: dict):
-        keys = ("status", "result", "first_s", "plan_total_s",
-                *(f"{s}_s" for s in STAGES), "exec_median_s", "exec_samples",
-                "error")  # fmt: skip
-        body = "".join(f"  {k:14} {record[k]}\n" for k in keys if k in record)
-        self._write(f"\n==== measured ====\n{body}")
+        text = f"\n==== {PLAN_STAGES.get(stage, stage)} ====\n{program}\n"
+        if stage == "compiler":
+            text += "\nformats:\n" + "".join(
+                f"  {str(alias):16} {ftype}\n" for alias, ftype in bindings.items()
+            )
+        self._write(text)
 
 
-def append_plan_status(path: Path, status: str, error: str):
-    """Record a failure the worker could not write itself (timeout, crash)."""
-    if path.exists():
-        with path.open("a", encoding="utf-8") as file:
-            file.write(f"\n==== measured ====\n  status         {status}\n"
-                       f"  error          {error}\n")  # fmt: skip
+def _cold_run(query, tensors, config, recorder, on_cold_done, plan_only=False):
+    """The first compute of *query*, with a fresh scheduler whose plan
+    *recorder* writes; returns its count and seconds."""
+    from finchtensorbench.benchmarks.autoschedule import build_scheduler
+
+    on_program = recorder.on_program if recorder else None
+    result = _run_once(
+        query, tensors,
+        build_scheduler(config, on_program=on_program, plan_only=plan_only),
+    )  # fmt: skip
+    on_cold_done()
+    return result
 
 
-def measure_plan_only(
-    query, tensors, config, runs, recorder: PlanRecorder | None = None,
-    on_cold_done=None,
-):  # fmt: skip
+def measure_plan_only(query, tensors, config, runs, recorder, on_cold_done):
     """Plan *query* without compiling or running it: once cold, then *runs*
     times (at least once) with fresh schedulers, reporting the medians."""
     from finchtensorbench.benchmarks.autoschedule import (
@@ -303,15 +259,7 @@ def measure_plan_only(
         describe_orders,
     )
 
-    on_program = recorder.on_program if recorder else None
-    _, first_s = _run_once(
-        query, tensors, build_scheduler(config, on_program=on_program, plan_only=True)
-    )
-    if recorder:
-        recorder.stop()
-    if on_cold_done is not None:
-        on_cold_done()
-
+    _, first_s = _cold_run(query, tensors, config, recorder, on_cold_done, True)
     totals, stages = [], {stage: [] for stage in STAGES}
     for _ in range(max(runs, 1)):
         context = build_scheduler(config, plan_only=True)
@@ -328,24 +276,14 @@ def measure_plan_only(
     }
 
 
-def measure_query(
-    query, tensors, config, runs, recorder: PlanRecorder | None = None,
-    on_cold_done=None,
-):  # fmt: skip
+def measure_query(query, tensors, config, runs, recorder, on_cold_done):
+    """Steps 1-3 of the module docstring: cold, fresh plan, cached runs."""
     from finchtensorbench.benchmarks.autoschedule import (
         build_scheduler,
         describe_orders,
     )
 
-    on_program = recorder.on_program if recorder else None
-    result, first_s = _run_once(
-        query, tensors, build_scheduler(config, on_program=on_program)
-    )
-    if recorder:
-        recorder.stop()
-    if on_cold_done is not None:
-        on_cold_done()
-
+    _, first_s = _cold_run(query, tensors, config, recorder, on_cold_done)
     context = build_scheduler(config)
     result, plan_total_s = _run_once(query, tensors, context)
     stage_times = dict(context.timer.times)
@@ -361,7 +299,10 @@ def measure_query(
 
     return {
         "result": result,
-        "correct": counts_match(result, query.ground_truth),
+        # Compared as float64 (finch's counts are float64): counts above 2**53
+        # are not exact, so the ground truth is rounded the same way.
+        "correct": query.ground_truth is not None
+        and result == float(query.ground_truth),
         "first_s": first_s,
         "plan_total_s": plan_total_s,
         **{f"{stage}_s": stage_times[stage] for stage in STAGES},
@@ -377,32 +318,6 @@ def measure_query(
 def _emit(file, record):
     file.write(json.dumps(record) + "\n")
     file.flush()
-
-
-def warm_up(config, plan_only=False):
-    """Run (or, with *plan_only*, plan) a tiny labelled path query so Julia
-    start-up and Finch's generic compilation happen before any timed (and
-    time-limited) query."""
-    from finchtensorbench.benchmarks.autoschedule import build_scheduler
-
-    graph = gcare.GCareGraph(
-        name="warmup",
-        max_vid=3,
-        continuous_ids=True,
-        vectors={"V0": np.array([0, 2])},
-        matrices={"E0": (np.array([0, 1, 2]), np.array([1, 2, 3]))},
-    )
-    query = gcare.GCareQuery(
-        dataset="warmup",
-        name="warmup/path",
-        vertices=(0, 1, 2),
-        operands=(
-            gcare.Operand("V0", (0,)),
-            gcare.Operand("E0", (0, 1)),
-            gcare.Operand("E0", (1, 2)),
-        ),
-    )
-    _run_once(query, GraphTensors(graph), build_scheduler(config, plan_only=plan_only))
 
 
 def _stdin_lines():
@@ -432,17 +347,29 @@ def _stdin_lines():
 
 
 def run_worker(args):
+    from finchtensorbench.benchmarks.autoschedule import build_scheduler
+
     revision = _finch_revision()
     config = parse_config(args.config)
     graph = gcare.load_graph(args.dataset, args.data_dir)
     tensors = GraphTensors(graph)
-    if args.queries == ["-"]:
-        # Serve query names from stdin, one per line, until it closes.
-        by_name = {q.name: q for q in gcare.load_queries(graph, None, args.data_dir)}
-        queries = (by_name[name] for name in _stdin_lines() if name)
-    else:
-        queries = gcare.load_queries(graph, args.queries, args.data_dir)
-    warm_up(config, args.plan_only)
+    # Serve query names from stdin, one per line, until it closes.
+    by_name = {q.name: q for q in gcare.load_queries(graph, None, args.data_dir)}
+    queries = (by_name[name] for name in _stdin_lines() if name)
+    # Run (or plan) a tiny labelled path query first, so Julia start-up and
+    # Finch's generic compilation are not charged to a timed query.
+    warmup = gcare.GCareGraph(
+        name="warmup", max_vid=3, continuous_ids=True,
+        vectors={"V0": np.array([0, 2])},
+        matrices={"E0": (np.array([0, 1, 2]), np.array([1, 2, 3]))},
+    )  # fmt: skip
+    path_query = gcare.GCareQuery(
+        dataset="warmup", name="warmup/path", vertices=(0, 1, 2),
+        operands=(gcare.Operand("V0", (0,)), gcare.Operand("E0", (0, 1)),
+                  gcare.Operand("E0", (1, 2))),
+    )  # fmt: skip
+    _run_once(path_query, GraphTensors(warmup),
+              build_scheduler(config, plan_only=args.plan_only))  # fmt: skip
     measure = measure_plan_only if args.plan_only else measure_query
     with args.worker_output.open("a", encoding="utf-8") as out:
         for query in queries:
@@ -469,7 +396,12 @@ def run_worker(args):
                 oom = isinstance(error, MemoryError) or "OutOfMemoryError" in message
                 record = {"status": "oom" if oom else "error", "error": message[:2000]}
             if recorder:
-                recorder.append_record(record)
+                keys = ("status", "result", "first_s", "plan_total_s",
+                        *(f"{s}_s" for s in STAGES), "exec_median_s",
+                        "exec_samples", "error")  # fmt: skip
+                recorder._write("\n==== measured ====\n" + "".join(
+                    f"  {k:14} {record[k]}\n" for k in keys if k in record
+                ))  # fmt: skip
             record["finch_revision"] = revision
             record["hash_seed"] = os.environ.get("PYTHONHASHSEED", "")
             _emit(out, {"event": "done", "query": query.name, "record": record})
@@ -478,36 +410,6 @@ def run_worker(args):
 # ---------------------------------------------------------------------------
 # Parent
 # ---------------------------------------------------------------------------
-
-
-def _base_row(dataset, config_name, query, plan_dir=None):
-    row = {
-        "dataset": dataset,
-        "config": config_name,
-        "query": query.name,
-        "family": query.family,
-        "ground_truth": query.ground_truth,
-    }
-    if plan_dir is not None:
-        path = plan_path(plan_dir, config_name, query.name)
-        row["plan_file"] = str(path.relative_to(plan_dir.parent))
-    return row
-
-
-def _memory_limiter(limit_gb):
-    """``preexec_fn`` capping the worker's address space (RLIMIT_AS) at *limit_gb*.
-
-    Allocations past the cap raise (Julia ``OutOfMemoryError``, numpy
-    ``MemoryError``), which the worker records as status ``oom``.
-    """
-    if not limit_gb:
-        return None
-    limit = int(limit_gb * 1024**3)
-
-    def apply():
-        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
-
-    return apply
 
 
 def _cgroup_dir() -> Path | None:
@@ -521,17 +423,6 @@ def _cgroup_dir() -> Path | None:
     return None
 
 
-def cgroup_memory_max_gb() -> float | None:
-    """The memory cap of the cgroup this run is in (e.g. systemd-run
-    ``-p MemoryMax``), or None if it is unlimited or unknown."""
-    folder = _cgroup_dir()
-    try:
-        value = (folder / "memory.max").read_text().strip() if folder else "max"
-    except OSError:
-        return None
-    return None if value == "max" else int(value) / 1024**3
-
-
 def _cgroup_oom_kills() -> int:
     folder = _cgroup_dir()
     try:
@@ -542,39 +433,6 @@ def _cgroup_oom_kills() -> int:
     except (OSError, TypeError, ValueError):
         pass
     return 0
-
-
-def _worker_setup(limit_gb, cpu):
-    """``preexec_fn`` for a worker: pin it to *cpu* and cap its address space."""
-    limit_memory = _memory_limiter(limit_gb)
-
-    def setup():
-        if cpu is not None:
-            os.sched_setaffinity(0, {cpu})
-        if limit_memory is not None:
-            limit_memory()
-
-    return setup
-
-
-def default_cpus() -> list[int]:
-    """The CPUs this process may use, one logical CPU per physical core (so two
-    workers never share a core's hardware threads), in CPU order.  Falls back
-    to every allowed CPU when the topology is not readable."""
-    allowed = sorted(os.sched_getaffinity(0))
-    topology = Path("/sys/devices/system/cpu")
-    cores: dict[tuple[str, str], int] = {}
-    try:
-        for cpu in allowed:
-            base = topology / f"cpu{cpu}" / "topology"
-            key = (
-                (base / "physical_package_id").read_text().strip(),
-                (base / "core_id").read_text().strip(),
-            )
-            cores.setdefault(key, cpu)
-    except OSError:
-        return allowed
-    return sorted(cores.values())
 
 
 class WorkerSlot:
@@ -605,7 +463,6 @@ class WorkerSlot:
             "--config", self.config_name,
             "--dataset", args.dataset,
             "--runs", str(args.runs),
-            "--queries", "-",
             *(["--plan-only"] if args.plan_only else []),
         ]  # fmt: skip
         if args.data_dir:
@@ -620,6 +477,17 @@ class WorkerSlot:
             env[var] = "1"
         # Set iteration order (and so plan tie-breaking) is fixed across workers.
         env["PYTHONHASHSEED"] = str(args.hash_seed)
+        cpu, limit_gb = self.cpu, args.memory_limit_gb
+
+        def setup():
+            # Pin the worker to its CPU and cap its address space; allocations
+            # past the cap raise (Julia OutOfMemoryError, numpy MemoryError),
+            # which the worker records as status oom.
+            os.sched_setaffinity(0, {cpu})
+            if limit_gb:
+                limit = int(limit_gb * 1024**3)
+                resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+
         self.log_file = self.log.open("w")
         self.process = subprocess.Popen(
             command,
@@ -628,17 +496,9 @@ class WorkerSlot:
             stdout=self.log_file,
             stderr=subprocess.STDOUT,
             text=True,
-            preexec_fn=_worker_setup(args.memory_limit_gb, self.cpu),
+            preexec_fn=setup,
         )
         self.served = 0
-
-    def _events(self):
-        with self.output.open(encoding="utf-8") as file:
-            file.seek(self.offset)
-            chunk = file.read()
-        complete = chunk[: chunk.rfind("\n") + 1]
-        self.offset += len(complete.encode("utf-8"))
-        return [json.loads(line) for line in complete.splitlines()]
 
     def _stop(self):
         if self.process is not None:
@@ -660,11 +520,11 @@ class WorkerSlot:
             self._stop()
             self._start()
         index = self.served
-        record = self._serve(query, index)
+        record = self._serve(query)
         record["worker_query"] = index
         return record
 
-    def _serve(self, query, index) -> dict:
+    def _serve(self, query) -> dict:
         # Two phases, limited alike for every query: the cold first compute
         # (--first-timeout, which absorbs compilation wherever the query falls
         # in a worker's queue) and the timed fresh plan plus cached runs
@@ -674,7 +534,13 @@ class WorkerSlot:
         started = None
         phase, limit = "cold", self.args.first_timeout
         while True:
-            for event in self._events():
+            # The worker's new complete event lines.
+            with self.output.open(encoding="utf-8") as file:
+                file.seek(self.offset)
+                chunk = file.read()
+            complete = chunk[: chunk.rfind("\n") + 1]
+            self.offset += len(complete.encode("utf-8"))
+            for event in map(json.loads, complete.splitlines()):
                 if event["query"] != query.name:
                     continue
                 if event["event"] == "start":
@@ -685,40 +551,33 @@ class WorkerSlot:
                 else:
                     self.served += 1
                     return event["record"]
-            if self.process.poll() is not None and not self._events_pending():
-                return self._died(query, started)
+            if (self.process.poll() is not None
+                    and self.output.stat().st_size <= self.offset):  # fmt: skip
+                # The worker died with no record left to read.
+                code = self.process.returncode
+                self._stop()
+                text = self.log.read_text()
+                if started is None and self.served == 0:
+                    # Died before serving anything (e.g. an import error): give up.
+                    raise RuntimeError(
+                        f"worker for {self.config_name} on cpu {self.cpu} failed:\n"
+                        f"{text[-4000:]}"
+                    )
+                tail = text[-500:].replace("\n", " | ")
+                kills = _cgroup_oom_kills()
+                if kills > self.args.cgroup_oom_kills:
+                    self.args.cgroup_oom_kills = kills
+                    tail = f"[cgroup OOM kill: the whole run's memory cap was hit] {tail}"
+                # We did not kill it, so SIGKILL means the kernel OOM killer.
+                oom = code == -9 or any(
+                    s in text for s in ("OutOfMemory", "MemoryError", "out of memory")
+                )
+                return {"status": "oom" if oom else "crash",
+                        "error": f"exit {code}: {tail}"}  # fmt: skip
             if started and time.monotonic() - started > limit:
                 self._stop()
-                return {
-                    "status": "timeout",
-                    "error": f"{phase} phase exceeded {limit:g}s",
-                    "timeout_phase": phase,
-                }
+                return {"status": "timeout", "error": f"{phase} phase exceeded {limit:g}s"}
             time.sleep(0.2)
-
-    def _events_pending(self) -> bool:
-        return self.output.stat().st_size > self.offset
-
-    def _died(self, query, started) -> dict:
-        code = self.process.returncode
-        self._stop()
-        text = self.log.read_text()
-        if started is None and self.served == 0:
-            # Died before serving anything (e.g. an import error): give up.
-            raise RuntimeError(
-                f"worker for {self.config_name} on cpu {self.cpu} failed:\n"
-                f"{text[-4000:]}"
-            )
-        tail = text[-500:].replace("\n", " | ")
-        kills = _cgroup_oom_kills()
-        if kills > self.args.cgroup_oom_kills:
-            self.args.cgroup_oom_kills = kills
-            tail = f"[cgroup OOM kill: the whole run's memory cap was hit] {tail}"
-        # We did not kill it, so SIGKILL means the kernel OOM killer.
-        oom = code == -9 or any(
-            s in text for s in ("OutOfMemory", "MemoryError", "out of memory")
-        )
-        return {"status": "oom" if oom else "crash", "error": f"exit {code}: {tail}"}
 
     def close(self):
         if self.process is not None and self.process.poll() is None:
@@ -747,19 +606,37 @@ def run_config(args, config_name, queries, writer, csv_file):
                 except queue.Empty:
                     return
                 record = slot.run(query)
-                row = _base_row(args.dataset, config_name, query, args.plan_dir)
-                row.update(record, cpu=cpu)
-                if args.plan_dir and "result" not in record:
+                row = {"dataset": args.dataset, "config": config_name,
+                       "query": query.name, "family": query.family,
+                       "ground_truth": query.ground_truth, **record, "cpu": cpu}  # fmt: skip
+                status = record["status"]
+                if args.plan_dir:
                     path = plan_path(args.plan_dir, config_name, query.name)
-                    if record["status"] in ("timeout", "crash") or (
-                        record["status"] == "oom" and "exit" in record.get("error", "")
-                    ):
-                        append_plan_status(path, record["status"], record["error"])
+                    row["plan_file"] = str(path.relative_to(args.plan_dir.parent))
+                    # A killed or crashed worker could not note it in the plan.
+                    killed = status in ("timeout", "crash") or (
+                        status == "oom" and "exit" in record.get("error", "")
+                    )
+                    if killed and path.exists():
+                        with path.open("a", encoding="utf-8") as file:
+                            file.write(f"\n==== measured ====\n  status         {status}\n"
+                                       f"  error          {record['error']}\n")  # fmt: skip
+                if status in ("ok", "wrong", "unchecked"):
+                    detail = (
+                        f"exec {row['exec_median_s']:.4g}s  plan {row['plan_total_s']:.4g}s"
+                        f"  first {row['first_s']:.4g}s  count {row['result']:.0f}"
+                        f" (gt {row['ground_truth']})"
+                    )
+                elif status == "planned":
+                    detail = (f"plan {row['plan_total_s']:.4g}s  first {row['first_s']:.4g}s"
+                              f"  loops {row['loop_order']}")  # fmt: skip
+                else:
+                    detail = row.get("error", "")
                 with lock:
                     rows.append(row)
                     writer.writerow(row)
                     csv_file.flush()
-                    _print_row(row)
+                    print(f"  {status:7} {query.name:22} {detail}", flush=True)
         finally:
             slot.close()
 
@@ -770,23 +647,6 @@ def run_config(args, config_name, queries, writer, csv_file):
             for future in futures:
                 future.result()
     return rows
-
-
-def _print_row(row):
-    if row["status"] in ("ok", "wrong", "unchecked"):
-        detail = (
-            f"exec {row['exec_median_s']:.4g}s  plan {row['plan_total_s']:.4g}s  "
-            f"first {row['first_s']:.4g}s  count {row['result']:.0f} "
-            f"(gt {row['ground_truth']})"
-        )
-    elif row["status"] == "planned":
-        detail = (
-            f"plan {row['plan_total_s']:.4g}s  first {row['first_s']:.4g}s  "
-            f"loops {row['loop_order']}"
-        )
-    else:
-        detail = row.get("error", "")
-    print(f"  {row['status']:7} {row['query']:22} {detail}", flush=True)
 
 
 def main(argv=None):
@@ -867,7 +727,20 @@ def main(argv=None):
         args.first_timeout = args.timeout
     args.cgroup_oom_kills = _cgroup_oom_kills()
     if args.cpus is None:
-        args.cpus = default_cpus()
+        # One logical CPU per physical core (so two workers never share a
+        # core's hardware threads), or every allowed CPU if the topology is
+        # unreadable.
+        allowed = sorted(os.sched_getaffinity(0))
+        cores: dict[tuple[str, str], int] = {}
+        try:
+            for cpu in allowed:
+                base = Path(f"/sys/devices/system/cpu/cpu{cpu}/topology")
+                key = ((base / "physical_package_id").read_text().strip(),
+                       (base / "core_id").read_text().strip())  # fmt: skip
+                cores.setdefault(key, cpu)
+            args.cpus = sorted(cores.values())
+        except OSError:
+            args.cpus = allowed
     if args.jobs < 1 or args.jobs > len(args.cpus):
         parser.error(f"--jobs must be between 1 and the {len(args.cpus)} CPUs given")
     # Keep all workers together within a share of RAM, so that a query which
@@ -875,7 +748,12 @@ def main(argv=None):
     # taking down other processes.
     total_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024**3
     budget_gb = args.memory_fraction * total_gb
-    cap_gb = cgroup_memory_max_gb()
+    # The memory cap of the cgroup this run is in (e.g. systemd-run -p MemoryMax).
+    try:
+        cap = (_cgroup_dir() / "memory.max").read_text().strip()
+    except (OSError, TypeError):
+        cap = "max"
+    cap_gb = None if cap == "max" else int(cap) / 1024**3
     if cap_gb is not None and cap_gb < budget_gb:
         # The run's own cap (systemd-run MemoryMax) is tighter: keep the
         # workers' limits within it, so that a query that needs too much fails

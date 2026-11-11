@@ -60,48 +60,8 @@ WORKER = Path(__file__).with_name("galley_jl_subgraph.jl")
 PROJECT = Path(__file__).with_name("galley_jl")
 
 
-def workload(args):
-    """Download *args.dataset* if needed; return its graph kind ("gcare" or
-    "sgm"), graph file, and queries as (name, family, file, true count)."""
-    if args.dataset in gcare.SGM_DATASETS:
-        root = gcare.ensure_sgm_downloaded(args.dataset, args.data_dir)
-        kind, graph = "sgm", root / "graph.txt"
-        query_root, truth_root = root / "queries", root / "truth"
-    else:
-        root = gcare.ensure_downloaded(args.data_dir)
-        kind, graph = "gcare", root / "dataset" / args.dataset / f"{args.dataset}.txt"
-        query_root = root / "queryset" / args.dataset
-        truth_root = root / "ground_truth" / args.dataset
-    queries = []
-    for name in gcare.list_queries(args.dataset, args.data_dir):
-        truth = truth_root / f"{name}.txt"
-        count = truth.read_text().split()[0] if truth.is_file() else ""
-        queries.append((name, name.split("/")[0], query_root / f"{name}.txt", count))
-    return kind, graph, queries
-
-
 def julia_cmd(args):
     return [*args.julia.split(), f"--project={PROJECT}", "--startup-file=no"]
-
-
-def setup_julia(args):
-    """Install and precompile the pinned Galley.jl once, before the workers
-    start, so they neither race to do it nor spend their load time on it."""
-    print(f"setting up Galley.jl in {PROJECT} ...", flush=True)
-    subprocess.run(
-        [*julia_cmd(args), "-e", "using Pkg; Pkg.instantiate(); using Galley"],
-        check=True, timeout=args.load_timeout,
-    )
-
-
-def rss_gb(pid: int) -> float:
-    try:
-        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
-            if line.startswith("VmRSS:"):
-                return int(line.split()[1]) / 2**20
-    except OSError:
-        pass
-    return 0.0
 
 
 class Worker:
@@ -196,12 +156,33 @@ def main(argv=None):
     out = args.out_dir / f"{args.dataset}_galleyjl_{stamp}.csv"
     args.log_dir = args.out_dir / f"{args.dataset}_galleyjl_{stamp}_logs"
     args.log_dir.mkdir(parents=True, exist_ok=True)
-    kind, graph, args.queries = workload(args)
+    # Download the dataset if needed, and list its queries as
+    # (name, family, file, true count).
+    if args.dataset in gcare.SGM_DATASETS:
+        root = gcare.ensure_sgm_downloaded(args.dataset, args.data_dir)
+        kind, graph = "sgm", root / "graph.txt"
+        query_root, truth_root = root / "queries", root / "truth"
+    else:
+        root = gcare.ensure_downloaded(args.data_dir)
+        kind, graph = "gcare", root / "dataset" / args.dataset / f"{args.dataset}.txt"
+        query_root = root / "queryset" / args.dataset
+        truth_root = root / "ground_truth" / args.dataset
+    args.queries = []
+    for name in gcare.list_queries(args.dataset, args.data_dir):
+        truth = truth_root / f"{name}.txt"
+        count = truth.read_text().split()[0] if truth.is_file() else ""
+        args.queries.append((name, name.split("/")[0], query_root / f"{name}.txt", count))
     args.manifest = args.log_dir / "manifest.tsv"
     args.manifest.write_text(f"graph\t{kind}\t{graph.resolve()}\n" + "".join(
         f"query\t{path.resolve()}\n" for _, _, path, _ in args.queries))
     print(f"{args.dataset}: {len(args.queries)} queries", flush=True)
-    setup_julia(args)
+    # Install and precompile the pinned Galley.jl once, before the workers
+    # start, so they neither race to do it nor spend their load time on it.
+    print(f"setting up Galley.jl in {PROJECT} ...", flush=True)
+    subprocess.run(
+        [*julia_cmd(args), "-e", "using Pkg; Pkg.instantiate(); using Galley"],
+        check=True, timeout=args.load_timeout,
+    )
     cpus = args.cpus or list(range(args.jobs))
     if len(cpus) < args.jobs:
         parser.error("--cpus needs one CPU per job")
@@ -278,7 +259,14 @@ def main(argv=None):
                         worker.stop()
                         next_q = max(next_q, last + 1)
                         break
-                    if now > deadline or rss_gb(worker.process.pid) > args.memory_limit_gb:
+                    try:  # the worker's resident memory, in GB
+                        status_file = Path(f"/proc/{worker.process.pid}/status")
+                        rss = next(int(line.split()[1]) / 2**20
+                                   for line in status_file.read_text().splitlines()
+                                   if line.startswith("VmRSS:"))
+                    except (OSError, StopIteration):
+                        rss = 0.0
+                    if now > deadline or rss > args.memory_limit_gb:
                         over = now > deadline
                         worker.stop()
                         if current is None:
