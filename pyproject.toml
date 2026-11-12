@@ -86,14 +86,24 @@ no-build-isolation = ["scorch"]
 
 [tool.pixi.feature.scorch.activation.env]
 PYTHONPATH = "src"
+# omp.h / libomp from conda-forge llvm-openmp.
+CPATH = "$CONDA_PREFIX/include"
+LIBRARY_PATH = "$CONDA_PREFIX/lib"
+
+[tool.pixi.feature.scorch.target.osx-arm64.activation.env]
 CC = "/usr/bin/clang"
 CXX = "/usr/bin/clang++"
 # Scorch JIT-compiles kernels with a hardcoded -isystem to the Command Line
 # Tools SDK's libc++; the C headers must come from that same SDK.
 SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
-# omp.h / libomp from conda-forge llvm-openmp.
-CPATH = "$CONDA_PREFIX/include"
-LIBRARY_PATH = "$CONDA_PREFIX/lib"
+
+# On Linux, Scorch builds with conda-forge's GCC, as PyTorch was built: its c++
+# comes first on the PATH, which torch's extension builder uses.
+[tool.pixi.feature.scorch.target.linux-64.dependencies]
+cxx-compiler = "*"
+
+[tool.pixi.feature.scorch.target.linux-aarch64.dependencies]
+cxx-compiler = "*"
 
 [tool.pixi.feature.scorch.tasks]
 run-scorch = "python src/finchtensorbench/benchmarks/microbenchmarks/run_scorch.py"
@@ -142,7 +152,7 @@ PYTHONPATH = "$PIXI_PROJECT_ROOT/src:$PIXI_PROJECT_ROOT/external/tensor-schedule
 build-sparseauto = """
 perl -pi -e 's|#include <bits/types/clock_t.h>|#include <ctime>|' external/sparseLNR/test/tests-workspaces.cpp \
   && cmake -S external/sparseLNR -B external/sparseLNR/build -DCMAKE_BUILD_TYPE=Release \
-       "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -Wno-c++11-narrowing-const-reference" \
+       "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -Wno-c++11-narrowing-const-reference -Wno-narrowing" \
   && cmake --build external/sparseLNR/build -j8 \
   && sh external/tensor-schedules/create_folders.sh
 """
@@ -166,11 +176,13 @@ numba = ">=0.61,<0.63.1"  # galley-jl-python's range; conda would pick newer
 PYTHONPATH = "$PIXI_PROJECT_ROOT/src:$PIXI_PROJECT_ROOT/external/tensor-schedules"
 JULIA_DEPOT_PATH = "$PIXI_PROJECT_ROOT/.pixi/global-julia-depot:"
 GALLEY_JL_PYTHON_CACHE = "$PIXI_PROJECT_ROOT/.pixi/global-galley-cache"
+CPATH = "$CONDA_PREFIX/include"
+LIBRARY_PATH = "$CONDA_PREFIX/lib"
+
+[tool.pixi.feature.global.target.osx-arm64.activation.env]
 CC = "/usr/bin/clang"
 CXX = "/usr/bin/clang++"
 SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
-CPATH = "$CONDA_PREFIX/include"
-LIBRARY_PATH = "$CONDA_PREFIX/lib"
 
 [tool.pixi.activation.env]
 PYTHONPATH = "src"

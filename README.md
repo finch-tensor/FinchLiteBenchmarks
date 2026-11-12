@@ -90,7 +90,7 @@ Each backend has its own pixi environment and task, which writes a CSV to
 |---|---|---|
 | finch | `pixi run run-finch` | |
 | Galley.jl | `pixi run -e galley run-galley` | through galley-jl-python |
-| Scorch | `pixi run -e scorch run-scorch` | its environment sets macOS compilers and `SDKROOT`; on Linux, override `CC`, `CXX` and `SDKROOT` |
+| Scorch | `pixi run -e scorch run-scorch` | builds Scorch from `external/scorch`, with the Command Line Tools' clang on macOS and conda-forge's GCC on Linux |
 | SparseAuto | `pixi run -e sparseauto build-sparseauto`, then `pixi run -e sparseauto run-sparseauto` | builds TACO from `external/sparseLNR` |
 
 `pixi run run-all [backends...]` runs them all (or the ones named) and plots
