@@ -83,16 +83,14 @@ def chain_cases():
 ######################### Gustavson / Outer Product ##########################
 
 def spgemm(a, b):
-    return ft.compute(ft.defer(a) @ ft.defer(b).T)
+    return ft.compute(ft.defer(a) @ ft.defer(b))
 
 
 def spgemm_cases():
     results = []
     for shared in (1, 4, 16, 64, 256, 1024, 4096, 16384, 65536):
-        a, b = paper_spgemm.make_inputs(shared)
-        a = ft.defer(ft.asarray(a.T)).T
-        b = ft.defer(ft.asarray(b.T)).T
-        results.append(((a, b), shared))
+        a, b = paper_spgemm.benchmark_problem(shared)
+        results.append(((ft.asarray(a), ft.asarray(b)), shared))
     return results
 
 
@@ -138,7 +136,7 @@ def warm_case(name, function, inputs, parameter, *, capture=False):
     if capture and workspaces is not None:
         trace.events.insert(0, (
             "Paper SpGEMM dataset",
-            f"Operation: A @ B.T; base input shapes: {inputs[0].shape}, {inputs[1].shape}.\n"
+            f"Operation: A @ B; input shapes: {inputs[0].shape}, {inputs[1].shape}.\n"
             f"Original artifact: {paper_spgemm.SOURCE}\n"
             f"{paper_spgemm.ACTIVE_COLUMNS} active columns per input, "
             f"{paper_spgemm.NONZEROS_PER_COLUMN} nonzeros per active column, "

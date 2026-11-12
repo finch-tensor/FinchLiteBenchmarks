@@ -4,6 +4,7 @@ make_inputs(shared) regenerates the artifact's structure for any number of share
 active columns; load_inputs() still loads the exact committed files (shared = 64)."""
 
 import hashlib
+import os
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -93,15 +94,15 @@ def load_inputs(data_dir=DATA_DIR):
     return tuple(matrices)
 
 
-def _random_columns(rng, columns):
-    """CSC (ROWS x COLS) with NONZEROS_PER_COLUMN distinct random rows in each given column."""
+def _random_columns(rng, columns, per_column=NONZEROS_PER_COLUMN):
+    """CSC (ROWS x COLS) with per_column distinct random rows in each given column."""
     columns = np.sort(columns)
-    rows = rng.integers(0, ROWS, size=(columns.size, NONZEROS_PER_COLUMN))
+    rows = rng.integers(0, ROWS, size=(columns.size, per_column))
     rows.sort(axis=1)
     while (repeat := np.flatnonzero((np.diff(rows, axis=1) == 0).any(axis=1))).size:
-        rows[repeat] = np.sort(rng.integers(0, ROWS, size=(repeat.size, NONZEROS_PER_COLUMN)), axis=1)
+        rows[repeat] = np.sort(rng.integers(0, ROWS, size=(repeat.size, per_column)), axis=1)
     counts = np.zeros(COLS, dtype=np.intp)
-    counts[columns] = NONZEROS_PER_COLUMN
+    counts[columns] = per_column
     indptr = np.concatenate(([0], np.cumsum(counts))).astype(np.intp)
     indices = rows.reshape(-1).astype(np.intp)
     return sps.csc_array((rng.random(indices.size), indices, indptr), shape=(ROWS, COLS))
@@ -122,3 +123,53 @@ def make_inputs(shared_columns, seed=SEED):
     b = _random_columns(rng, np.concatenate((shared, only_b)))
     validate_inputs(a, b, shared_columns)
     return a, b
+
+
+def make_striped_problem(shared_columns, seed=SEED, per_column=NONZEROS_PER_COLUMN):
+    """A variant of make_problem whose A and B have exactly the same nonzero k
+    indices: `shared_columns` random columns of A, each with per_column distinct
+    random rows, and the same rows of B (k x ROWS), each with per_column random
+    columns of its own. Every nonzero k is shared, so
+    the product does work at every k either matrix touches. Both are CSR."""
+    if not 1 <= shared_columns <= COLS:
+        raise ValueError(f"shared_columns must be between 1 and {COLS}")
+    rng = np.random.default_rng(seed)
+    shared = rng.permutation(COLS)[:shared_columns]
+    a = _random_columns(rng, shared, per_column)
+    b = _random_columns(rng, shared, per_column)
+    for matrix in (a, b):
+        counts = np.diff(matrix.indptr)
+        if np.flatnonzero(counts).size != shared_columns or matrix.nnz != shared_columns * per_column:
+            raise ValueError("striped input does not have the requested nonzero k indices")
+    problem = []
+    for matrix in (sps.csr_array(a), sps.csr_array(b.T)):
+        matrix.sort_indices()
+        matrix.indices = matrix.indices.astype(np.intp)
+        matrix.indptr = matrix.indptr.astype(np.intp)
+        problem.append(matrix)
+    return tuple(problem)
+
+
+def make_problem(shared_columns, seed=SEED):
+    """A and B, both CSR, for the benchmark's product C = A @ B: A is the artifact's
+    A (ROWS x COLS) and B its B transposed (COLS x ROWS), so the shared active columns
+    are the shared k indices. Every runner takes its inputs from here."""
+    a, b = make_inputs(shared_columns, seed)
+    problem = []
+    for matrix in (sps.csr_array(a), sps.csr_array(b.T)):
+        matrix.sort_indices()
+        matrix.indices = matrix.indices.astype(np.intp)
+        matrix.indptr = matrix.indptr.astype(np.intp)
+        problem.append(matrix)
+    return tuple(problem)
+
+
+def benchmark_problem(shared_columns, seed=SEED):
+    """The SpGEMM inputs every runner benchmarks: make_problem's paper construction
+    by default, or make_striped_problem's when SPGEMM_INPUTS=striped."""
+    kind = os.environ.get("SPGEMM_INPUTS", "paper")
+    if kind == "striped":
+        return make_striped_problem(shared_columns, seed)
+    if kind != "paper":
+        raise ValueError(f"SPGEMM_INPUTS must be paper or striped, not {kind!r}")
+    return make_problem(shared_columns, seed)

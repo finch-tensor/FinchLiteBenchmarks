@@ -88,16 +88,18 @@ def chain_cases(dtype):
 
 ######################### Gustavson / Outer Product ##########################
 
-def spgemm(at, bt):
-    # C[i, j] = sum_k A[i, k] * B[j, k], i.e. A @ B.T; output rows are sparse.
-    return scorch.einsum("ki,kj->ij", at, bt, format="ds")
+def spgemm(a, b):
+    # C = A @ B with Scorch's prebuilt SpGEMM, output rows sparse. Its einsum
+    # ("ik,kj->ij") on these CSR inputs fails to compile in float64 and segfaults
+    # in float32.
+    return scorch.matmul(a, b)
 
 
 def spgemm_cases(dtype):
     results = []
     for shared in (1, 4, 16, 64, 256, 1024, 4096, 16384, 65536):
-        a, b = paper_spgemm.make_inputs(shared)
-        results.append(((to_scorch_csr(a.T, "A", dtype), to_scorch_csr(b.T, "B", dtype)), shared))
+        a, b = paper_spgemm.benchmark_problem(shared)
+        results.append(((to_scorch_csr(a, "A", dtype), to_scorch_csr(b, "B", dtype)), shared))
     return results
 
 

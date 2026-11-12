@@ -75,16 +75,14 @@ def chain_cases():
 ######################### Gustavson / Outer Product ##########################
 
 def spgemm(a, b):
-    return gl.compute(gl.lazy(a) @ gl.lazy(b).T)
+    return gl.compute(gl.lazy(a) @ gl.lazy(b))
 
 
 def spgemm_cases():
     results = []
     for shared in (1, 4, 16, 64, 256, 1024, 4096, 16384, 65536):
-        a, b = paper_spgemm.make_inputs(shared)
-        a = gl.lazy(gl.asarray(a.T)).T
-        b = gl.lazy(gl.asarray(b.T)).T
-        results.append(((a, b), shared))
+        a, b = paper_spgemm.benchmark_problem(shared)
+        results.append(((gl.asarray(a), gl.asarray(b)), shared))
     return results
 
 

@@ -255,7 +255,7 @@ def chain_benchmark(directory):
 ######################### Gustavson / Outer Product ##########################
 
 SPGEMM_TEST = r"""
-// C(i,j) = A(i,k) * B(k,j) with A the paper's A and B the paper's B transposed, i.e. C = A @ B.T.
+// C(i,j) = A(i,k) * B(k,j), i.e. C = A @ B, with A and B from paper_spgemm.make_problem.
 // No hand schedule: TACO's default compile() picks the loop order and inserts any workspace.
 TEST(finchbench, spgemm) {
   setup_threads();
@@ -279,10 +279,10 @@ TEST(finchbench, spgemm) {
 def spgemm_benchmark(directory):
     cases = []
     for shared in (1, 4, 16, 64, 256, 1024, 4096, 16384, 65536):
-        a, b = paper_spgemm.make_inputs(shared)
+        a, b = paper_spgemm.benchmark_problem(shared)
         case = {"env": {"FINCHBENCH_A": write_mtx(directory, f"spgemm_A_{shared}", a),
-                        "FINCHBENCH_B": write_mtx(directory, f"spgemm_Bt_{shared}", b.T)},
-                "expected": float((a @ b.T).sum())}
+                        "FINCHBENCH_B": write_mtx(directory, f"spgemm_B_{shared}", b)},
+                "expected": float((a @ b).sum())}
         cases.append(("spgemm", shared, case))
     return cases
 
