@@ -99,8 +99,8 @@ def matrix_features(a, count):
     mean = ft.sum(x, axis=1) / denominator
     outputs = [mean]
     if count >= 2:
-        centered = x - ft.expand_dims(mean, axis=1)
-        variance = ft.sum(centered * centered, axis=1) / denominator
+        # E[x^2] - mean^2: avoids broadcasting `mean` against the sparse matrix.
+        variance = ft.sum(x * x, axis=1) / denominator - mean * mean
         outputs.append(variance ** ConstantScalar(np.float64(0.5)))
     if count >= 3:
         outputs.append(ft.max(x, axis=1))
@@ -110,8 +110,15 @@ def matrix_features(a, count):
 
 
 def matrix_feature_cases():
-    a = ft.asarray(np.random.default_rng(SEED).random((ROWS, COLS)))
-    return [(f"features_{count}", (a, count)) for count in (1, 2, 3, 4)]
+    matrix = sps.csr_array(sps.random(
+        ROWS, COLS, density=0.01, format="csr",
+        random_state=np.random.default_rng(SEED),
+    ))
+    matrix.indices = matrix.indices.astype(np.intp)
+    matrix.indptr = matrix.indptr.astype(np.intp)
+    a = ft.asarray(matrix)
+    density = matrix.nnz / (ROWS * COLS)
+    return [(f"features_{count}", (a, count), density) for count in (1, 2, 3, 4)]
 
 
 ######################### Main ##########################
@@ -165,8 +172,8 @@ def cases():
     for inputs, shared_k in spgemm_cases():
         for name in ("gustavson", "outer"):
             results.append((name, spgemm, inputs, shared_k))
-    for name, inputs in matrix_feature_cases():
-        results.append((name, matrix_features, inputs, 1.0))
+    for name, inputs, density in matrix_feature_cases():
+        results.append((name, matrix_features, inputs, density))
     return results
 
 

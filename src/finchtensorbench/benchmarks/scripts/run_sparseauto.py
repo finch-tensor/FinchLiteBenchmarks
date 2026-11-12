@@ -31,6 +31,7 @@ COLS = 5000
 SEED = 42
 THREADS = int(os.environ.get("THREADS", "1"))  # >1 also makes SparseAuto emit parallel schedules
 TRIALS = 5
+FEATURE_DENSITY = 0.01
 
 
 def random_csr(shape, density, seed):
@@ -291,15 +292,12 @@ def spgemm_benchmark(directory):
 ######################### Matrix Features ##########################
 
 FEATURES_TEST = r"""
-// Per-row mean, (centered) std dev, max, min of a dense matrix; FINCHBENCH_COUNT of them.
+// Per-row mean, (centered) std dev, max, min of a CSR matrix; FINCHBENCH_COUNT of them.
 TEST(finchbench, features) {
   setup_threads();
-  int R = std::stoi(util::getFromEnv("FINCHBENCH_ROWS", "1000"));
-  int N = std::stoi(util::getFromEnv("FINCHBENCH_COLS", "1000"));
+  Tensor<double> X = read_csr(util::getFromEnv("TENSOR_FILE", ""), "X");
+  int R = X.getDimension(0), N = X.getDimension(1);
   int count = std::stoi(util::getFromEnv("FINCHBENCH_COUNT", "1"));
-  Tensor<double> X("X", {R, N}, Format{Dense, Dense});
-  for (int r = 0; r < R; r++) for (int c = 0; c < N; c++) X.insert({r, c}, fill(r, c));
-  X.pack();
   IndexVar i("i"), j("j");
   IndexExpr inv_n = 1.0 / N;
   Func row_max("max", MaxReduce(), {Identity(Literal(-INFINITY))});
@@ -336,10 +334,15 @@ TEST(finchbench, features) {
 
 
 def matrix_feature_benchmark(directory):
-    x = dense_fill(ROWS, COLS)
+    matrix = sps.csr_array(sps.random(
+        ROWS, COLS, density=FEATURE_DENSITY, format="csr",
+        random_state=np.random.default_rng(SEED),
+    ))
+    path = write_mtx(directory, "features_X", matrix)
+    x = matrix.toarray()
     features = (x.mean(axis=1), x.std(axis=1), x.max(axis=1), x.min(axis=1))
     return [("features", count, {
-        "env": {"FINCHBENCH_ROWS": str(ROWS), "FINCHBENCH_COLS": str(COLS), "FINCHBENCH_COUNT": str(count)},
+        "env": {"TENSOR_FILE": path, "FINCHBENCH_COUNT": str(count)},
         "expected": float(sum(f.sum() for f in features[:count])),
     }) for count in (1, 2, 3, 4)]
 
@@ -463,7 +466,7 @@ def run(argv=None):
                           flush=True)
             for test, parameter, samples in fixed_benchmarks(directory):
                 if test == "features":
-                    name, row, label = f"features_{parameter}", (1.0, ""), "density=1"
+                    name, row, label = f"features_{parameter}", (FEATURE_DENSITY, ""), f"density={FEATURE_DENSITY:g}"
                 else:
                     name, row, label = test, ("", parameter), f"active_k={parameter}"
                 for trial, seconds in enumerate(samples):

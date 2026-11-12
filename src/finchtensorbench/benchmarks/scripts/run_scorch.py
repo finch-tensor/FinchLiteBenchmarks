@@ -114,9 +114,14 @@ def matrix_features(a, ones, count):
 
 
 def matrix_feature_cases(dtype):
-    a = to_scorch_dense(np.random.default_rng(SEED).random((ROWS, COLS)), "A", dtype)
+    matrix = sps.csr_array(sps.random(
+        ROWS, COLS, density=0.01, format="csr",
+        random_state=np.random.default_rng(SEED),
+    ))
+    a = to_scorch_csr(matrix, "A", dtype)
     ones = to_scorch_dense(np.ones(COLS), "x", dtype)
-    return [(f"features_{count}", (a, ones, count)) for count in (1, 2, 3, 4)]
+    density = matrix.nnz / (ROWS * COLS)
+    return [(f"features_{count}", (a, ones, count), density) for count in (1, 2, 3, 4)]
 
 
 ######################### Main ##########################
@@ -132,8 +137,8 @@ def cases(dtype):
             results.append((name, function, inputs, density))
     for inputs, shared_k in spgemm_cases(dtype):
         results.append(("spgemm", spgemm, inputs, shared_k))
-    for name, inputs in matrix_feature_cases(dtype):
-        results.append((name, matrix_features, inputs, 1.0))
+    for name, inputs, density in matrix_feature_cases(dtype):
+        results.append((name, matrix_features, inputs, density))
     return results
 
 
