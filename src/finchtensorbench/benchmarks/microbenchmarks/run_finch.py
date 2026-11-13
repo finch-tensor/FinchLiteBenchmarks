@@ -1,4 +1,5 @@
 import argparse
+import copy
 import csv
 import gc
 import time
@@ -8,7 +9,9 @@ import numpy as np
 import scipy.sparse as sps
 
 import finch as ft
-from finch.autoschedule import COMPILE_JULIA_GALLEY
+from finch.autoschedule import COMPILE_JULIA_GALLEY, LogicExecutor
+from finch.autoschedule.tensor_stats import DCStatsFactory, LPStatsFactory
+from finch.autoschedule.tensor_stats.memo_stats import MemoStatsFactory
 from finch.tensor.scalar import ConstantScalar
 
 from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, paper_spgemm
@@ -27,6 +30,29 @@ SDDMM_DENSITIES = (0.00001, 0.0001, 0.001, 0.01)
 CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
 CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
+
+# The statistics COMPILE_JULIA_GALLEY's executor plans with: LP bounds by default,
+# or degree constraints, the preset's own.
+STATS = {"lp": LPStatsFactory, "dc": DCStatsFactory}
+
+
+def with_stats(preset, stats):
+    """A copy of preset whose executor plans with the named statistics."""
+
+    def clone(stage):
+        copied = copy.copy(stage)
+        if isinstance(copied, LogicExecutor):
+            copied.stats_factory = MemoStatsFactory(STATS[stats]())
+        for attr in ("ctx", "ctx_lower", "ctx_load"):
+            child = getattr(stage, attr, None)
+            if child is not None:
+                setattr(copied, attr, clone(child))
+        return copied
+
+    return clone(preset)
+
+
+PRESET = with_stats(COMPILE_JULIA_GALLEY, "lp")
 
 
 def random_csr(shape, density, seed):
@@ -129,9 +155,9 @@ def warm_case(name, function, inputs, parameter, *, capture=False):
         label = f"shared_k={parameter}, workspace insertion={mode}"
     print(f"Warming {name}: {label}", flush=True)
     if capture:
-        scheduler, trace = capture_scheduler(COMPILE_JULIA_GALLEY, workspaces=workspaces)
+        scheduler, trace = capture_scheduler(PRESET, workspaces=workspaces)
     else:
-        scheduler = configured_scheduler(COMPILE_JULIA_GALLEY, workspaces=workspaces)
+        scheduler = configured_scheduler(PRESET, workspaces=workspaces)
         trace = None
     if capture and workspaces is not None:
         trace.events.insert(0, (
@@ -175,7 +201,12 @@ def cases():
 def run(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("graph/scripts/finch_result.csv"))
+    parser.add_argument("--stats", choices=sorted(STATS), default="lp",
+                        help="statistics the planner estimates sizes with (default: lp)")
     args = parser.parse_args(argv)
+    global PRESET
+    PRESET = with_stats(COMPILE_JULIA_GALLEY, args.stats)
+    print(f"Planning with {args.stats} statistics", flush=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="", encoding="utf-8") as output:
         writer = csv.writer(output)
