@@ -38,6 +38,12 @@ RESULT_STEMS = {
 }
 # The names the plots show for the systems their inputs are labeled with.
 DISPLAY_NAMES = {"Finch": "Crow's Nest"}
+# Plots that leave a system's results out. SparseAuto cannot schedule the row
+# norms (powers and roots are not products of tensors), and its SpGEMM schedule
+# drops products when a row of A has several nonzeros (it never adds the
+# workspace a sparse output needs), so run_sparseauto times TACO's default
+# kernels for both; those are not SparseAuto's results.
+EXCLUDED = {"SparseAuto": {"spgemm", "matrix_features"}}
 
 
 def load_results(inputs):
@@ -73,6 +79,8 @@ def load_results(inputs):
                 if family == "matrix_features" and point not in range(1, MAX_NORMS + 1):
                     raise ValueError(f"{path}:{line}: num_stats must be between 1 and {MAX_NORMS}")
                 shown = DISPLAY_NAMES.get(backend, backend)
+                if family in EXCLUDED.get(shown, ()):
+                    continue
                 results[family][(shown, variant)][point].append(seconds * 1000)
     return results
 
@@ -113,7 +121,7 @@ def draw_plot(axis, family, series, colors):
     else:
         axis.set(xscale="log", yscale="log")
         axis.grid(alpha=0.2)
-    axis.legend(frameon=False, fontsize=9)
+    axis.legend(frameon=False, fontsize=13)
 
 
 def plot_results(results, output):
@@ -124,11 +132,11 @@ def plot_results(results, output):
     palette = plt.get_cmap("tab10")
     colors = {name: COLORS.get(name, palette(index % 10))
               for index, name in enumerate(backends)}
-    with plt.rc_context({"font.size": 10, "axes.titlesize": 13,
+    with plt.rc_context({"font.size": 14, "axes.titlesize": 17,
                          "figure.facecolor": "white", "savefig.facecolor": "white",
                          "pdf.fonttype": 42}):
         overview, axes = plt.subplots(2, 2, figsize=(13, 9), layout="constrained")
-        overview.suptitle("Microbenchmarks", fontsize=17, fontweight="bold")
+        overview.suptitle("Microbenchmarks", fontsize=22, fontweight="bold")
         for axis, (family, series) in zip(axes.flat, results.items(), strict=True):
             draw_plot(axis, family, series, colors)
             figure, single_axis = plt.subplots(figsize=(8, 5), layout="constrained")

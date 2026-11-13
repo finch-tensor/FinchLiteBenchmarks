@@ -147,8 +147,11 @@ def main(argv=None):
     parser.add_argument("--cpus", type=int, nargs="+",
                         help="CPUs to pin workers to, one per job (default: 0..jobs-1)")
     parser.add_argument("--limit", type=int, help="only the first N queries")
+    parser.add_argument("--queries", nargs="+",
+                        help="query names, e.g. sparse_8/query_sparse_8_84 (default: all)")
     parser.add_argument("--out-dir", type=Path, default=Path("graph/subgraph_matching"))
     args = parser.parse_args(argv)
+    args.queries_wanted = args.queries
     if args.first_timeout is None:
         args.first_timeout = args.timeout
 
@@ -167,8 +170,14 @@ def main(argv=None):
         kind, graph = "gcare", root / "dataset" / args.dataset / f"{args.dataset}.txt"
         query_root = root / "queryset" / args.dataset
         truth_root = root / "ground_truth" / args.dataset
+    names = gcare.list_queries(args.dataset, args.data_dir)
+    if args.queries_wanted:
+        missing = set(args.queries_wanted) - set(names)
+        if missing:
+            parser.error(f"unknown queries: {sorted(missing)}")
+        names = [name for name in names if name in set(args.queries_wanted)]
     args.queries = []
-    for name in gcare.list_queries(args.dataset, args.data_dir):
+    for name in names:
         truth = truth_root / f"{name}.txt"
         count = truth.read_text().split()[0] if truth.is_file() else ""
         args.queries.append((name, name.split("/")[0], query_root / f"{name}.txt", count))

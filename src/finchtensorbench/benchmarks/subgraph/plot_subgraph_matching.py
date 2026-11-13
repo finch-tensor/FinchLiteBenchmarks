@@ -42,7 +42,7 @@ from finchtensorbench.benchmarks.subgraph.results import DONE, read_rows  # noqa
 COLORS = {"Crow's Nest": ("#2563eb", "#0ea5e9", "#1e3a8a"), "Galley": ("#ea580c",)}
 HATCHES = ("", "///", "...", "xxx")
 MUTED = "#64748b"
-STYLE = {"font.size": 10, "axes.titlesize": 13,
+STYLE = {"font.size": 14, "axes.titlesize": 17,
          "figure.facecolor": "white", "savefig.facecolor": "white",
          "pdf.fonttype": 42, "hatch.linewidth": 1.5}
 DATASET_NAMES = {"dblp": "DBLP", "youtube": "YouTube", "human": "Human",
@@ -51,7 +51,7 @@ DATASET_NAMES = {"dblp": "DBLP", "youtube": "YouTube", "human": "Human",
 METRICS = (
     ("exec_median_s", "Execution Time"),
     ("plan_total_s", "Fresh Plan + Execution"),
-    ("first_s", "Compilation + Execution Time"),
+    ("first_s", "Compilation Time"),
 )
 METRIC_NOTES = {
     "plan_total_s": "Fresh plan + execution: statistics, optimization and lowering "
@@ -125,12 +125,12 @@ def config_styles(configs, names):
     return styles
 
 
-def plot(paths, out=None, paired=False, cap=None, metrics=None):
+def plot(paths, out=None, paired=False, cap=None, metrics=None, side_by_side=False):
     with plt.rc_context(STYLE):
-        return _plot(paths, out, paired, cap, metrics)
+        return _plot(paths, out, paired, cap, metrics, side_by_side)
 
 
-def _plot(paths, out, paired, cap, metrics):
+def _plot(paths, out, paired, cap, metrics, side_by_side):
     # The panels to draw, by metric name (all of METRICS by default).
     panels = [m for m in METRICS if metrics is None or m[0] in metrics]
     rows = [row for path in paths for row in read_rows(path)]
@@ -213,7 +213,11 @@ def _plot(paths, out, paired, cap, metrics):
             slots[(d, group)] = x
             x += 1
         x += DATASET_GAP
-    fig_width = min(MAX_WIDTH_IN, max(7, 0.9 * len(slots) * len(configs) + 2))
+    if side_by_side:
+        # One panel per metric in a row, each wide enough for its group labels.
+        fig_width = len(panels) * max(7, 1.0 * len(slots)) + 1
+    else:
+        fig_width = min(MAX_WIDTH_IN, max(7, 0.9 * len(slots) * len(configs) + 2))
     note = "; ".join(
         f"{f'{shown(d)} ' if multi else ''}{names[c]}: {n} {s}"
         for (d, c, s), n in sorted(failed.items())
@@ -233,10 +237,13 @@ def _plot(paths, out, paired, cap, metrics):
     # The panels on top; below them, a strip of their own for the legend, so
     # the constrained layout never overlaps it.
     strip = 0.5  # inches
-    panels_height = 1.0 + 3.2 * len(panels)
+    panels_height = 5.5 if side_by_side else 1.0 + 3.2 * len(panels)
     fig = plt.figure(figsize=(fig_width, panels_height + strip), layout="constrained")
     top, bottom = fig.subfigures(2, 1, height_ratios=(panels_height, strip))
-    axes = top.subplots(len(panels), 1, squeeze=False)[:, 0]
+    if side_by_side:
+        axes = top.subplots(1, len(panels), squeeze=False)[0, :]
+    else:
+        axes = top.subplots(len(panels), 1, squeeze=False)[:, 0]
     counts = Counter(
         (r["dataset"], group_of(r)) for r in rows
         if r["config"] == configs[0]
@@ -272,7 +279,7 @@ def _plot(paths, out, paired, cap, metrics):
         ax.yaxis.set_major_formatter(FuncFormatter(_seconds))
         ax.yaxis.set_minor_formatter(NullFormatter())
         ax.set_xticks(list(slots.values()),
-                      [f"{g}\nn={counts[(d, g)]}" for d, g in slots], fontsize=9)
+                      [f"{g}\nn={counts[(d, g)]}" for d, g in slots], fontsize=12)
         ax.set_xlim(-0.6, max(slots.values()) + 0.6)
         for i, d in enumerate(datasets):
             # A light line before the dataset's "All", a dark one between datasets.
@@ -285,9 +292,9 @@ def _plot(paths, out, paired, cap, metrics):
             names_axis = ax.secondary_xaxis("bottom")
             names_axis.set_xticks(
                 [np.mean([slots[(d, g)] for g in groups_of[d]]) for d in datasets],
-                [shown(d) for d in datasets], fontsize=12, fontweight="bold",
+                [shown(d) for d in datasets], fontsize=16, fontweight="bold",
             )
-            names_axis.tick_params(length=0, pad=30)
+            names_axis.tick_params(length=0, pad=40)
             names_axis.spines["bottom"].set_visible(False)
         ax.set_ylabel("Runtime")
         ax.set_title(title)
@@ -302,10 +309,10 @@ def _plot(paths, out, paired, cap, metrics):
         for c in configs
     ]
     bottom.legend(handles, [names[c] for c in configs], loc="center",
-                  ncol=len(configs), frameon=False, fontsize=11)  # fmt: skip
+                  ncol=len(configs), frameon=False, fontsize=15)  # fmt: skip
     fig.suptitle(
         f"Subgraph Matching: {listed([shown(d) for d in datasets])}",
-        fontsize=17, fontweight="bold",
+        fontsize=22, fontweight="bold",
     )
     if out is None:
         out = Path(paths[0]).with_name(Path(paths[0]).stem + "_boxplot.png")
@@ -340,8 +347,14 @@ def main(argv=None):
         choices=[m for m, _ in METRICS],
         help="draw only these panels (default: all)",
     )
+    parser.add_argument(
+        "--side-by-side",
+        action="store_true",
+        help="put the panels in one row instead of stacking them",
+    )
     args = parser.parse_args(argv)
-    plot(args.csv, args.out, paired=args.paired, cap=args.cap, metrics=args.metrics)
+    plot(args.csv, args.out, paired=args.paired, cap=args.cap, metrics=args.metrics,
+         side_by_side=args.side_by_side)
 
 
 if __name__ == "__main__":

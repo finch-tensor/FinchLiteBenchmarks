@@ -28,9 +28,9 @@ TEST_FILE = TACO / "test/tests-finchbench.cpp"
 
 ROWS = 5000
 COLS = 5000
-SDDMM_ROWS = 10000  # SDDMM uses larger matrices than chain matmul
-SDDMM_COLS = 10000
-SDDMM_DENSITIES = (0.00001, 0.0001, 0.001, 0.01)
+SDDMM_ROWS = 20000  # SDDMM uses larger matrices than chain matmul
+SDDMM_COLS = 20000
+SDDMM_DENSITIES = (0.001, 0.003, 0.01, 0.03, 0.1)  # >= 400K mask nonzeros, well above call overhead
 CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
 CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
@@ -161,9 +161,9 @@ TEST(finchbench, sddmm) {
   stmt = stmt.concretize();
   std::cout << "final stmt: " << stmt << endl;
   A.compile(stmt);
-  A.assemble();
   for (int it = 0; it < iterations(); it++) {
     auto begin = std::chrono::steady_clock::now();
+    A.assemble();  // allocate the output in the timed region, like the other backends
     /* BEGIN finchbench_sddmm_execute TEST */
     /* END finchbench_sddmm_execute TEST */
     report_ms(begin);
@@ -215,9 +215,9 @@ TEST(finchbench, chain) {
   stmt = stmt.concretize();
   std::cout << "final stmt: " << stmt << endl;
   A.compile(stmt);
-  A.assemble();
   for (int it = 0; it < iterations(); it++) {
     auto begin = std::chrono::steady_clock::now();
+    A.assemble();  // allocate the output in the timed region, like the other backends
     /* BEGIN finchbench_chain_execute TEST */
     /* END finchbench_chain_execute TEST */
     report_ms(begin);

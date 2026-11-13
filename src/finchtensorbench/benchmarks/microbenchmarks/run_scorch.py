@@ -14,9 +14,9 @@ from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, pap
 
 ROWS = 5000
 COLS = 5000
-SDDMM_ROWS = 10000  # SDDMM uses larger matrices than chain matmul
-SDDMM_COLS = 10000
-SDDMM_DENSITIES = (0.00001, 0.0001, 0.001, 0.01)
+SDDMM_ROWS = 20000  # SDDMM uses larger matrices than chain matmul
+SDDMM_COLS = 20000
+SDDMM_DENSITIES = (0.001, 0.003, 0.01, 0.03, 0.1)  # >= 400K mask nonzeros, well above call overhead
 CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
 CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
@@ -46,7 +46,9 @@ def to_scorch_dense(array, name, dtype):
 ######################### SDDMM ##########################
 
 def sddmm(mask, a, b):
-    return scorch.einsum("ij,ik,kj->ij", mask, a, b, format="dd")
+    # No output format: Scorch infers one (COO here), which beats asking for
+    # dense ("dd", a 10^8-entry output) or row-compressed ("ds") at every density.
+    return scorch.einsum("ij,ik,kj->ij", mask, a, b)
 
 
 def sddmm_inputs(k, mask, seed, dtype):
@@ -72,7 +74,10 @@ def sddmm_cases(dtype):
 ######################### Chain Matmul ##########################
 
 def matmul(a, b, c):
-    return scorch.einsum("ij,jk,kl->il", a, b, c, format="dd")
+    # Two of Scorch's prebuilt CSR x CSR SpGEMMs, (A @ B) @ C: its einsum compiles
+    # a three-operand product into one i,j,k,l loop nest, while chained matmuls
+    # materialize A @ B, like A @ B @ C written with operators.
+    return scorch.matmul(scorch.matmul(a, b), c)
 
 
 def chain_cases(dtype):

@@ -14,9 +14,9 @@ from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, pap
 
 ROWS = 5000
 COLS = 5000
-SDDMM_ROWS = 10000  # SDDMM uses larger matrices than chain matmul
-SDDMM_COLS = 10000
-SDDMM_DENSITIES = (0.00001, 0.0001, 0.001, 0.01)
+SDDMM_ROWS = 20000  # SDDMM uses larger matrices than chain matmul
+SDDMM_COLS = 20000
+SDDMM_DENSITIES = (0.001, 0.003, 0.01, 0.03, 0.1)  # >= 400K mask nonzeros, well above call overhead
 CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
 CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
