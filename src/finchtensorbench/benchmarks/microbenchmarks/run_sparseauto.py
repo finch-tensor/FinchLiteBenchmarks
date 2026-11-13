@@ -97,6 +97,15 @@ Tensor<double> read_csr(const std::string& path, const std::string& name) {
   return t;
 }
 
+// SDDMM and the chain compute in float32, the precision Scorch runs in.
+Tensor<float> read_csr32(const std::string& path, const std::string& name) {
+  Tensor<double> t = read(path, Format({Dense, Sparse}), true);
+  Tensor<float> f(name, t.getDimensions(), Format({Dense, Sparse}));
+  for (const auto& v : t) f.insert(v.first.toVector(), (float)v.second);
+  f.pack();
+  return f;
+}
+
 void setup_threads() {
   int nthreads = std::stoi(util::getFromEnv("OMP_NUM_THREADS", "1"));
   taco_set_num_threads(nthreads);
@@ -118,6 +127,13 @@ void report_sum(std::vector<Tensor<double>> outputs) {
 }
 
 void report_sum(Tensor<double>& out) { report_sum(std::vector<Tensor<double>>{out}); }
+
+void report_sum(Tensor<float>& out) {
+  double sum = 0;
+  for (const auto& val : out) sum += val.second;
+  std::cout.precision(17);
+  std::cout << "FINCHBENCH_SUM " << sum << endl;
+}
 
 // Compile each kernel, then time computing all of them in order.
 void time_kernels(std::vector<std::pair<Tensor<double>, IndexStmt>> kernels,
@@ -143,16 +159,16 @@ SDDMM_TEST = r"""
 // A(i,j) = B(i,j) * C(i,k) * D(k,j): B is the CSR mask, C and D are dense.
 TEST(finchbench, sddmm) {
   setup_threads();
-  Tensor<double> B = read_csr(util::getFromEnv("TENSOR_FILE", ""), "B");
+  Tensor<float> B = read_csr32(util::getFromEnv("TENSOR_FILE", ""), "B");
   int I = B.getDimension(0), J = B.getDimension(1);
   int K = std::stoi(util::getFromEnv("FINCHBENCH_K", "128"));
-  Tensor<double> C("C", {I, K}, Format{Dense, Dense});
-  for (int i = 0; i < I; i++) for (int k = 0; k < K; k++) C.insert({i, k}, fill(i, k));
+  Tensor<float> C("C", {I, K}, Format{Dense, Dense});
+  for (int i = 0; i < I; i++) for (int k = 0; k < K; k++) C.insert({i, k}, (float)fill(i, k));
   C.pack();
-  Tensor<double> D("D", {K, J}, Format{Dense, Dense});
-  for (int k = 0; k < K; k++) for (int j = 0; j < J; j++) D.insert({k, j}, fill(k, j));
+  Tensor<float> D("D", {K, J}, Format{Dense, Dense});
+  for (int k = 0; k < K; k++) for (int j = 0; j < J; j++) D.insert({k, j}, (float)fill(k, j));
   D.pack();
-  Tensor<double> A("A", {I, J}, Format{Dense, Dense});
+  Tensor<float> A("A", {I, J}, Format{Dense, Dense});
   IndexVar i("i"), j("j"), k("k");
 
   /* BEGIN finchbench_sddmm TEST */
@@ -201,12 +217,12 @@ CHAIN_TEST = r"""
 // A(i,l) = B(i,j) * C(j,k) * D(k,l): all CSR; D (TENSOR_FILE) varies.
 TEST(finchbench, chain) {
   setup_threads();
-  Tensor<double> B = read_csr(util::getFromEnv("FINCHBENCH_B", ""), "B");
-  Tensor<double> C = read_csr(util::getFromEnv("FINCHBENCH_C", ""), "C");
-  Tensor<double> D = read_csr(util::getFromEnv("TENSOR_FILE", ""), "D");
+  Tensor<float> B = read_csr32(util::getFromEnv("FINCHBENCH_B", ""), "B");
+  Tensor<float> C = read_csr32(util::getFromEnv("FINCHBENCH_C", ""), "C");
+  Tensor<float> D = read_csr32(util::getFromEnv("TENSOR_FILE", ""), "D");
   int I = B.getDimension(0), J = B.getDimension(1);
   int K = C.getDimension(1), L = D.getDimension(1);
-  Tensor<double> A("A", {I, L}, Format{Dense, Dense});
+  Tensor<float> A("A", {I, L}, Format{Dense, Dense});
   IndexVar i("i"), j("j"), k("k"), l("l");
 
   /* BEGIN finchbench_chain TEST */
@@ -363,6 +379,9 @@ def schedule_code(name, accesses, config):
     visitor = UnfusedConfigToTacoVisitor(f"finchbench_{name}", accesses, config.original_idx_perm,
                                          str(TEST_FILE), THREADS)
     visitor.visit(deepcopy(config))
+    # SparseAuto declares its temporaries as Tensor<double>; match the float32 operands.
+    combined = visitor.get_combined_schedule
+    visitor.get_combined_schedule = lambda: combined().replace("Tensor<double>", "Tensor<float>")
     return visitor
 
 
@@ -382,7 +401,8 @@ def run_case(name, case):
     checksum = [float(line.split()[1]) for line in lines if line.startswith("FINCHBENCH_SUM")]
     if result.returncode or len(times) != TRIALS + 1 or not checksum:
         raise RuntimeError(f"taco-test {name} failed:\n{result.stdout[-3000:]}\n{result.stderr[-3000:]}")
-    if not np.isclose(checksum[0], case["expected"], rtol=1e-7, atol=1e-9):
+    # float32 sums of millions of terms carry ~1e-7 relative error.
+    if not np.isclose(checksum[0], case["expected"], rtol=1e-5, atol=1e-9):
         raise RuntimeError(f"{name}: wrong result (sum {checksum[0]} != {case['expected']})")
     return times[1:]  # drop warmup
 

@@ -20,13 +20,16 @@ SDDMM_DENSITIES = (0.001, 0.003, 0.01, 0.03, 0.1)  # >= 400K mask nonzeros, well
 CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
 CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
+# Every input is float32, the precision Scorch runs in (its code generator has no
+# float64 sparse outputs), so all four systems compute at the same precision.
+DTYPE = np.float32
 
 
 def random_csr(shape, density, seed):
     matrix = sps.csr_array(sps.random(
         *shape, density=density, format="csr",
         random_state=np.random.default_rng(seed), data_rvs=np.ones,
-    ))
+    )).astype(DTYPE)
     matrix.indices = matrix.indices.astype(np.intp)
     matrix.indptr = matrix.indptr.astype(np.intp)
     return matrix
@@ -41,8 +44,8 @@ def sddmm(a, b, c):
 def sddmm_inputs(k, mask, seed):
     rng = np.random.default_rng(seed + k)
     rows, cols = mask.shape
-    a = rng.random((rows, k))
-    b = rng.random((k, cols))
+    a = rng.random((rows, k)).astype(DTYPE)
+    b = rng.random((k, cols)).astype(DTYPE)
     return gl.asarray(a), gl.asarray(b), gl.asarray(mask)
 
 
@@ -82,7 +85,7 @@ def spgemm_cases():
     results = []
     for shared in (1, 4, 16, 64, 256, 1024, 4096, 16384, 65536):
         a, b = paper_spgemm.benchmark_problem(shared)
-        results.append(((gl.asarray(a), gl.asarray(b)), shared))
+        results.append(((gl.asarray(a.astype(DTYPE)), gl.asarray(b.astype(DTYPE))), shared))
     return results
 
 
@@ -94,12 +97,12 @@ def matrix_features(a, count):
     outputs = []
     for p in feature_matrix.POWERS[:count]:
         total = gl.sum(a if p == 1 else a ** p, axis=1)
-        outputs.append(total if p == 1 else total ** (1.0 / p))
+        outputs.append(total if p == 1 else total ** DTYPE(1.0 / p))
     return tuple(outputs)
 
 
 def matrix_feature_cases():
-    matrix = feature_matrix.make_matrix()
+    matrix = feature_matrix.make_matrix().astype(DTYPE)
     matrix.indices = matrix.indices.astype(np.intp)
     matrix.indptr = matrix.indptr.astype(np.intp)
     a = gl.asarray(matrix)
