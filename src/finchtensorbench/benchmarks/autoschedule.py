@@ -88,7 +88,13 @@ except ImportError:
 from finch.compile_jl.compiler import FinchJLCompiler
 from finch.finch_logic import Aggregate, Fuse, LogicSimplify, Reorder
 
-LOGIC_ORDERERS = ("default", "galley-greedy", "galley-bfs", "galley-dfs")
+LOGIC_ORDERERS = (
+    "default",
+    "galley-greedy",
+    "galley-bfs",
+    "galley-dfs",
+    "galley-best-first",  # needs a finch-tensor with hn/logic-optimizer-fixes
+)
 LOOP_ORDERERS = {
     "default": DefaultLoopOrderer,
     "greedy": GreedyLoopOrderer,
