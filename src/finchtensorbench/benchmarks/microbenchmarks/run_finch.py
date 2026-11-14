@@ -1,4 +1,5 @@
 import argparse
+import copy
 import csv
 import gc
 import time
@@ -8,27 +9,63 @@ import numpy as np
 import scipy.sparse as sps
 
 import finch as ft
-from finch.autoschedule import COMPILE_JULIA_GALLEY
+from finch.autoschedule import COMPILE_JULIA_GALLEY, LogicExecutor
+from finch.autoschedule.tensor_stats import DCStatsFactory, LPStatsFactory
+from finch.autoschedule.tensor_stats.memo_stats import MemoStatsFactory
 from finch.tensor.scalar import ConstantScalar
 
-from finchtensorbench.benchmarks.scripts.util import paper_spgemm
-from finchtensorbench.benchmarks.scripts.util.scheduler_trace import (
+from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, paper_spgemm
+from finchtensorbench.benchmarks.microbenchmarks.util.scheduler_trace import (
     capture_scheduler,
     configured_scheduler,
     finish_capture,
 )
-from finchtensorbench.benchmarks.scripts.util.search_trace import capture_search
+from finchtensorbench.benchmarks.microbenchmarks.util.search_trace import capture_search
 
 ROWS = 5000
 COLS = 5000
+SDDMM_ROWS = 20000  # SDDMM uses larger matrices than chain matmul
+SDDMM_COLS = 20000
+SDDMM_DENSITIES = (0.001, 0.003, 0.01, 0.03, 0.1)  # >= 400K mask nonzeros, well above call overhead
+CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
+CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
+# Every input is float32, the precision Scorch runs in (its code generator has no
+# float64 sparse outputs), so all four systems compute at the same precision.
+DTYPE = np.float32
+# Except the row norms: in float32 the planner reformats the 1%-dense 50k x 50k input
+# into a dense copy from 7 norms on (~74x slower), so they stay float64.
+FEATURES_DTYPE = np.float64
+
+# The statistics COMPILE_JULIA_GALLEY's executor plans with: LP bounds by default,
+# or degree constraints, the preset's own.
+STATS = {"lp": LPStatsFactory, "dc": DCStatsFactory}
+
+
+def with_stats(preset, stats):
+    """A copy of preset whose executor plans with the named statistics."""
+
+    def clone(stage):
+        copied = copy.copy(stage)
+        if isinstance(copied, LogicExecutor):
+            copied.stats_factory = MemoStatsFactory(STATS[stats]())
+        for attr in ("ctx", "ctx_lower", "ctx_load"):
+            child = getattr(stage, attr, None)
+            if child is not None:
+                setattr(copied, attr, clone(child))
+        return copied
+
+    return clone(preset)
+
+
+PRESET = with_stats(COMPILE_JULIA_GALLEY, "lp")
 
 
 def random_csr(shape, density, seed):
     matrix = sps.csr_array(sps.random(
         *shape, density=density, format="csr",
         random_state=np.random.default_rng(seed), data_rvs=np.ones,
-    ))
+    )).astype(DTYPE)
     matrix.indices = matrix.indices.astype(np.intp)
     matrix.indptr = matrix.indptr.astype(np.intp)
     return matrix
@@ -42,8 +79,8 @@ def sddmm(a, b, c):
 def sddmm_inputs(k: int, c_scipy: sps.csr_array, seed: int):
     rng = np.random.default_rng(seed + k)
     rows, cols = c_scipy.shape
-    a = rng.random((rows, k))
-    b = rng.random((k, cols))
+    a = rng.random((rows, k)).astype(DTYPE)
+    b = rng.random((k, cols)).astype(DTYPE)
     return (
         ft.asarray(a),
         ft.asarray(b),
@@ -52,10 +89,10 @@ def sddmm_inputs(k: int, c_scipy: sps.csr_array, seed: int):
 
 def sddmm_cases():
     results = []
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0):
-        mask = random_csr((ROWS, COLS), density, SEED + 2)
+    for density in SDDMM_DENSITIES:
+        mask = random_csr((SDDMM_ROWS, SDDMM_COLS), density, SEED + 2)
         b, c, mask_finch = sddmm_inputs(128, mask, SEED)
-        results.append(((mask_finch, b, c), mask.nnz / (ROWS * COLS)))
+        results.append(((mask_finch, b, c), mask.nnz / (SDDMM_ROWS * SDDMM_COLS)))
     return results
 
 
@@ -67,9 +104,9 @@ def matmul(a, b, c):
 def chain_cases():
     results = []
     shape = (ROWS, COLS)
-    a = ft.asarray(random_csr(shape, 0.1, SEED))
-    b = ft.asarray(random_csr(shape, 0.1, SEED + 1))
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1):
+    a = ft.asarray(random_csr(shape, CHAIN_AB_DENSITY, SEED))
+    b = ft.asarray(random_csr(shape, CHAIN_AB_DENSITY, SEED + 1))
+    for density in CHAIN_DENSITIES:
         c = random_csr(shape, density, SEED + 2)
         results.append(((a, b, ft.asarray(c)), c.nnz / (ROWS * COLS)))
     return results
@@ -78,40 +115,37 @@ def chain_cases():
 ######################### Gustavson / Outer Product ##########################
 
 def spgemm(a, b):
-    return ft.compute(ft.defer(a) @ ft.defer(b).T)
+    return ft.compute(ft.defer(a) @ ft.defer(b))
 
 
 def spgemm_cases():
     results = []
     for shared in (1, 4, 16, 64, 256, 1024, 4096, 16384, 65536):
-        a, b = paper_spgemm.make_inputs(shared)
-        a = ft.defer(ft.asarray(a.T)).T
-        b = ft.defer(ft.asarray(b.T)).T
-        results.append(((a, b), shared))
+        a, b = paper_spgemm.benchmark_problem(shared)
+        results.append(((ft.asarray(a.astype(DTYPE)), ft.asarray(b.astype(DTYPE))), shared))
     return results
 
 
 ######################### Matrix Features ##########################
 
 def matrix_features(a, count):
+    # Row Lp norms, p = 1..count. The values are nonnegative, so no abs is needed.
     x = ft.defer(a)
-    denominator = ConstantScalar(np.float64(a.shape[1]))
-    mean = ft.sum(x, axis=1) / denominator
-    outputs = [mean]
-    if count >= 2:
-        centered = x - ft.expand_dims(mean, axis=1)
-        variance = ft.sum(centered * centered, axis=1) / denominator
-        outputs.append(variance ** ConstantScalar(np.float64(0.5)))
-    if count >= 3:
-        outputs.append(ft.max(x, axis=1))
-    if count >= 4:
-        outputs.append(ft.min(x, axis=1))
+    outputs = []
+    for p in feature_matrix.POWERS[:count]:
+        powered = x if p == 1 else x ** ConstantScalar(np.int64(p))
+        total = ft.sum(powered, axis=1)
+        outputs.append(total if p == 1 else total ** ConstantScalar(FEATURES_DTYPE(1.0 / p)))
     return ft.compute(tuple(outputs))
 
 
 def matrix_feature_cases():
-    a = ft.asarray(np.random.default_rng(SEED).random((ROWS, COLS)))
-    return [(f"features_{count}", (a, count)) for count in (1, 2, 3, 4)]
+    matrix = feature_matrix.make_matrix().astype(FEATURES_DTYPE)
+    matrix.indices = matrix.indices.astype(np.intp)
+    matrix.indptr = matrix.indptr.astype(np.intp)
+    a = ft.asarray(matrix)
+    return [(f"features_{count}", (a, count))
+            for count in range(1, len(feature_matrix.POWERS) + 1)]
 
 
 ######################### Main ##########################
@@ -127,14 +161,14 @@ def warm_case(name, function, inputs, parameter, *, capture=False):
         label = f"shared_k={parameter}, workspace insertion={mode}"
     print(f"Warming {name}: {label}", flush=True)
     if capture:
-        scheduler, trace = capture_scheduler(COMPILE_JULIA_GALLEY, workspaces=workspaces)
+        scheduler, trace = capture_scheduler(PRESET, workspaces=workspaces)
     else:
-        scheduler = configured_scheduler(COMPILE_JULIA_GALLEY, workspaces=workspaces)
+        scheduler = configured_scheduler(PRESET, workspaces=workspaces)
         trace = None
     if capture and workspaces is not None:
         trace.events.insert(0, (
             "Paper SpGEMM dataset",
-            f"Operation: A @ B.T; base input shapes: {inputs[0].shape}, {inputs[1].shape}.\n"
+            f"Operation: A @ B; input shapes: {inputs[0].shape}, {inputs[1].shape}.\n"
             f"Original artifact: {paper_spgemm.SOURCE}\n"
             f"{paper_spgemm.ACTIVE_COLUMNS} active columns per input, "
             f"{paper_spgemm.NONZEROS_PER_COLUMN} nonzeros per active column, "
@@ -166,14 +200,19 @@ def cases():
         for name in ("gustavson", "outer"):
             results.append((name, spgemm, inputs, shared_k))
     for name, inputs in matrix_feature_cases():
-        results.append((name, matrix_features, inputs, 1.0))
+        results.append((name, matrix_features, inputs, feature_matrix.DENSITY))
     return results
 
 
 def run(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("graph/scripts/finch_result.csv"))
+    parser.add_argument("--stats", choices=sorted(STATS), default="lp",
+                        help="statistics the planner estimates sizes with (default: lp)")
     args = parser.parse_args(argv)
+    global PRESET
+    PRESET = with_stats(COMPILE_JULIA_GALLEY, args.stats)
+    print(f"Planning with {args.stats} statistics", flush=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="", encoding="utf-8") as output:
         writer = csv.writer(output)

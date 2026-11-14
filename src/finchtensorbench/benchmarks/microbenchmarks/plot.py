@@ -10,19 +10,40 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix
+
+MAX_NORMS = len(feature_matrix.POWERS)
+DPI = 300  # for the PNGs
+# Each plot is saved as a vector PDF, plus a PNG for quick viewing.
+FORMATS = ("pdf", "png")
 
 PLOTS = {
     "sddmm": ("SDDMM", "Mask density"),
     "chain": ("Matrix chain ABC", "C density"),
-    "spgemm": ("Sparse matrix multiply", "Shared active k-indices"),
-    "matrix_features": ("Matrix row features", "Number of features per row"),
+    "spgemm": ("Sparse matrix multiply", "Active k-indices"),
+    "matrix_features": ("Row Lp norms (50k x 50k CSR, 1% dense)", "Norms per row"),
 }
 COLORS = {
-    "Finch": "#2563eb",
+    "Crow's Nest": "#2563eb",
     "Galley": "#ea580c",
     "Scorch": "#0d9488",
     "SparseAuto": "#9333ea",
 }
+# The stem of each system's result CSV in graph/scripts, as its runner writes it.
+RESULT_STEMS = {
+    "Crow's Nest": "finch",
+    "Galley": "galley",
+    "Scorch": "scorch",
+    "SparseAuto": "sparseauto",
+}
+# The names the plots show for the systems their inputs are labeled with.
+DISPLAY_NAMES = {"Finch": "Crow's Nest"}
+# Plots that leave a system's results out. SparseAuto cannot schedule the row
+# norms (powers and roots are not products of tensors), and its SpGEMM schedule
+# drops products when a row of A has several nonzeros (it never adds the
+# workspace a sparse output needs), so run_sparseauto times TACO's default
+# kernels for both; those are not SparseAuto's results.
+EXCLUDED = {"SparseAuto": {"spgemm", "matrix_features"}}
 
 
 def load_results(inputs):
@@ -55,9 +76,12 @@ def load_results(inputs):
                     raise ValueError(f"{path}:{line}: seconds must be finite and positive")
                 if not np.isfinite(point) or point <= 0:
                     raise ValueError(f"{path}:{line}: sweep values must be positive")
-                if family == "matrix_features" and point not in (1, 2, 3, 4):
-                    raise ValueError(f"{path}:{line}: num_stats must be between 1 and 4")
-                results[family][(backend, variant)][point].append(seconds * 1000)
+                if family == "matrix_features" and point not in range(1, MAX_NORMS + 1):
+                    raise ValueError(f"{path}:{line}: num_stats must be between 1 and {MAX_NORMS}")
+                shown = DISPLAY_NAMES.get(backend, backend)
+                if family in EXCLUDED.get(shown, ()):
+                    continue
+                results[family][(shown, variant)][point].append(seconds * 1000)
     return results
 
 
@@ -81,19 +105,23 @@ def draw_plot(axis, family, series, colors):
             positions = x - 1 + (index - (len(series) - 1) / 2) * width
             axis.bar(positions, median, width, color=color, label=label, alpha=0.9)
         else:
-            outer = "outer" in variant.lower()
-            axis.plot(x, median, label=label, color=color, linewidth=2,
-                      marker="s" if outer else "o",
-                      linestyle="--" if outer else "-", markersize=5)
+            # The run without workspaces is dashed, with square markers, and the
+            # run with them has diamonds, which show beneath other systems' circles.
+            no_workspace = any(word in variant.lower() for word in ("outer", "disabled"))
+            marker = "s" if no_workspace else "D" if variant else "o"
+            axis.plot(x, median, label=label, color=color, linewidth=2, marker=marker,
+                      linestyle="--" if no_workspace else "-", markersize=5)
 
     if family == "matrix_features":
-        axis.set_xticks(range(4), ("1\nMean", "2\n+ std dev", "3\n+ max", "4\n+ min"))
+        counts = sorted({int(point) for points in series.values() for point in points})
+        axis.set_xticks([c - 1 for c in counts],
+                        [f"{c}\nL1" if c == 1 else f"{c}\n+ L{c}" for c in counts])
         axis.set_ylim(bottom=0)
         axis.grid(axis="y", alpha=0.2)
     else:
         axis.set(xscale="log", yscale="log")
         axis.grid(alpha=0.2)
-    axis.legend(frameon=False, fontsize=9)
+    axis.legend(frameon=False, fontsize=13)
 
 
 def plot_results(results, output):
@@ -104,17 +132,20 @@ def plot_results(results, output):
     palette = plt.get_cmap("tab10")
     colors = {name: COLORS.get(name, palette(index % 10))
               for index, name in enumerate(backends)}
-    with plt.rc_context({"font.size": 10, "axes.titlesize": 13,
-                         "figure.facecolor": "white", "savefig.facecolor": "white"}):
+    with plt.rc_context({"font.size": 14, "axes.titlesize": 17,
+                         "figure.facecolor": "white", "savefig.facecolor": "white",
+                         "pdf.fonttype": 42}):
         overview, axes = plt.subplots(2, 2, figsize=(13, 9), layout="constrained")
-        overview.suptitle("Tensor benchmark runtimes", fontsize=17, fontweight="bold")
+        overview.suptitle("Microbenchmarks", fontsize=22, fontweight="bold")
         for axis, (family, series) in zip(axes.flat, results.items(), strict=True):
             draw_plot(axis, family, series, colors)
             figure, single_axis = plt.subplots(figsize=(8, 5), layout="constrained")
             draw_plot(single_axis, family, series, colors)
-            figure.savefig(output / f"{family}.png", dpi=180)
+            for fmt in FORMATS:
+                figure.savefig(output / f"{family}.{fmt}", dpi=DPI)
             plt.close(figure)
-        overview.savefig(output / "all_benchmarks.png", dpi=180)
+        for fmt in FORMATS:
+            overview.savefig(output / f"all_benchmarks.{fmt}", dpi=DPI)
         plt.close(overview)
 
 
@@ -133,7 +164,8 @@ def run(argv=None):
                 parser.error("--input must have the form LABEL=CSV")
             inputs.append((label, Path(path)))
     else:
-        inputs = [(name, Path(f"graph/scripts/{name.lower()}_result.csv")) for name in COLORS]
+        inputs = [(name, Path(f"graph/scripts/{stem}_result.csv"))
+                  for name, stem in RESULT_STEMS.items()]
         inputs = [(name, path) for name, path in inputs if path.is_file()]
     if not inputs:
         parser.error("No timing CSVs found; run Finch or provide --input LABEL=CSV")
@@ -141,7 +173,7 @@ def run(argv=None):
     if not any(results.values()):
         parser.error("The input CSVs contain no timing rows")
     plot_results(results, args.output)
-    print(f"Saved four plots and an overview (PNG) to {args.output}")
+    print(f"Saved four plots and an overview (PDF and PNG) to {args.output}")
 
 
 if __name__ == "__main__":

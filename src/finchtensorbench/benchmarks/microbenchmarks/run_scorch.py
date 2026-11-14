@@ -10,10 +10,15 @@ import torch
 
 import scorch
 
-from finchtensorbench.benchmarks.scripts.util import paper_spgemm
+from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, paper_spgemm
 
 ROWS = 5000
 COLS = 5000
+SDDMM_ROWS = 20000  # SDDMM uses larger matrices than chain matmul
+SDDMM_COLS = 20000
+SDDMM_DENSITIES = (0.001, 0.003, 0.01, 0.03, 0.1)  # >= 400K mask nonzeros, well above call overhead
+CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
+CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
 
 
@@ -41,7 +46,9 @@ def to_scorch_dense(array, name, dtype):
 ######################### SDDMM ##########################
 
 def sddmm(mask, a, b):
-    return scorch.einsum("ij,ik,kj->ij", mask, a, b, format="dd")
+    # No output format: Scorch infers one (COO here), which beats asking for
+    # dense ("dd", a 10^8-entry output) or row-compressed ("ds") at every density.
+    return scorch.einsum("ij,ik,kj->ij", mask, a, b)
 
 
 def sddmm_inputs(k, mask, seed, dtype):
@@ -58,24 +65,27 @@ def sddmm_inputs(k, mask, seed, dtype):
 
 def sddmm_cases(dtype):
     results = []
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0):
-        mask = random_csr((ROWS, COLS), density, SEED + 2)
-        results.append((sddmm_inputs(128, mask, SEED, dtype), mask.nnz / (ROWS * COLS)))
+    for density in SDDMM_DENSITIES:
+        mask = random_csr((SDDMM_ROWS, SDDMM_COLS), density, SEED + 2)
+        results.append((sddmm_inputs(128, mask, SEED, dtype), mask.nnz / (SDDMM_ROWS * SDDMM_COLS)))
     return results
 
 
 ######################### Chain Matmul ##########################
 
 def matmul(a, b, c):
-    return scorch.einsum("ij,jk,kl->il", a, b, c, format="dd")
+    # Two of Scorch's prebuilt CSR x CSR SpGEMMs, (A @ B) @ C: its einsum compiles
+    # a three-operand product into one i,j,k,l loop nest, while chained matmuls
+    # materialize A @ B, like A @ B @ C written with operators.
+    return scorch.matmul(scorch.matmul(a, b), c)
 
 
 def chain_cases(dtype):
     results = []
     shape = (ROWS, COLS)
-    a = to_scorch_csr(random_csr(shape, 0.1, SEED), "A", dtype)
-    b = to_scorch_csr(random_csr(shape, 0.1, SEED + 1), "B", dtype)
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1):
+    a = to_scorch_csr(random_csr(shape, CHAIN_AB_DENSITY, SEED), "A", dtype)
+    b = to_scorch_csr(random_csr(shape, CHAIN_AB_DENSITY, SEED + 1), "B", dtype)
+    for density in CHAIN_DENSITIES:
         c = random_csr(shape, density, SEED + 2)
         results.append(((a, b, to_scorch_csr(c, "C", dtype)), c.nnz / (ROWS * COLS)))
     return results
@@ -83,40 +93,58 @@ def chain_cases(dtype):
 
 ######################### Gustavson / Outer Product ##########################
 
-def spgemm(at, bt):
-    # C[i, j] = sum_k A[i, k] * B[j, k], i.e. A @ B.T; output rows are sparse.
-    return scorch.einsum("ki,kj->ij", at, bt, format="ds")
+def spgemm(a, b):
+    # C = A @ B with Scorch's prebuilt SpGEMM, output rows sparse. Its einsum
+    # ("ik,kj->ij") on these CSR inputs fails to compile in float64 and segfaults
+    # in float32.
+    return scorch.matmul(a, b)
 
 
 def spgemm_cases(dtype):
     results = []
     for shared in (1, 4, 16, 64, 256, 1024, 4096, 16384, 65536):
-        a, b = paper_spgemm.make_inputs(shared)
-        results.append(((to_scorch_csr(a.T, "A", dtype), to_scorch_csr(b.T, "B", dtype)), shared))
+        a, b = paper_spgemm.benchmark_problem(shared)
+        results.append(((to_scorch_csr(a, "A", dtype), to_scorch_csr(b, "B", dtype)), shared))
     return results
 
 
 ######################### Matrix Features ##########################
 
+def power(values, p):
+    # torch's CPU pow special-cases exponents 2 and 3; others take a generic path that
+    # is ~40x slower here, so larger integer powers are computed by repeated squaring.
+    if p in (2, 3):
+        return values ** p
+    result, base = None, values
+    while p:
+        if p & 1:
+            result = base if result is None else result * base
+        p >>= 1
+        if p:
+            base = torch.square(base)
+    return result
+
+
 def matrix_features(a, ones, count):
-    n = a.shape[1]
-    total = scorch.einsum("ij,j->i", a, ones, format="d").to_torch()
-    mean = total / n
-    outputs = [mean]
-    if count >= 2:
-        squares = scorch.einsum("ij,ij->i", a, a, format="d").to_torch()
-        outputs.append(torch.sqrt(squares / n - mean * mean))
-    if count >= 3:
-        outputs.append(torch.amax(a.to_torch(in_place=False), dim=1))
-    if count >= 4:
-        outputs.append(torch.amin(a.to_torch(in_place=False), dim=1))
+    """Row Lp norms, p = 1..count. Scorch has no pow or root: PyTorch raises the stored
+    values to p (zeros stay zero, so the CSR index is reused), Scorch sums each row with
+    its prebuilt CSR SpMV (matmul by a ones vector), and PyTorch takes the root of the
+    length-R sums. The values are nonnegative, so |x|^p = x^p. All of it is timed."""
+    outputs = []
+    for p in feature_matrix.POWERS[:count]:
+        powered = a if p == 1 else scorch.STensor(
+            name=f"A{p}", shape=a.shape, index=a.index, value=power(a.values, p))
+        total = scorch.matmul(powered, ones)
+        outputs.append(total if p == 1 else total ** (1.0 / p))
     return tuple(outputs)
 
 
 def matrix_feature_cases(dtype):
-    a = to_scorch_dense(np.random.default_rng(SEED).random((ROWS, COLS)), "A", dtype)
-    ones = to_scorch_dense(np.ones(COLS), "x", dtype)
-    return [(f"features_{count}", (a, ones, count)) for count in (1, 2, 3, 4)]
+    matrix = feature_matrix.make_matrix()
+    a = to_scorch_csr(matrix, "A", dtype)
+    ones = to_scorch_dense(np.ones(matrix.shape[1]), "x", dtype)
+    return [(f"features_{count}", (a, ones, count))
+            for count in range(1, len(feature_matrix.POWERS) + 1)]
 
 
 ######################### Main ##########################
@@ -133,7 +161,7 @@ def cases(dtype):
     for inputs, shared_k in spgemm_cases(dtype):
         results.append(("spgemm", spgemm, inputs, shared_k))
     for name, inputs in matrix_feature_cases(dtype):
-        results.append((name, matrix_features, inputs, 1.0))
+        results.append((name, matrix_features, inputs, feature_matrix.DENSITY))
     return results
 
 

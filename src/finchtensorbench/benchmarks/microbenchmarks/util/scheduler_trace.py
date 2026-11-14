@@ -9,9 +9,14 @@ from finch.autoschedule.workspacer import (
     LogicWorkspacer,
     add_cost_effective_reformats,
 )
+
+try:
+    from finch.autoschedule.workspacer import add_accumulators
+except ImportError:  # finch versions before workspace accumulators
+    add_accumulators = None
 from finch.compile_jl.compiler import FinchJLCompiler
 
-from finchtensorbench.benchmarks.scripts.util.trace_stats import format_config, format_stats
+from finchtensorbench.benchmarks.microbenchmarks.util.trace_stats import format_config, format_stats
 
 
 class SchedulerTrace:
@@ -80,7 +85,9 @@ class CapturedStage:
 
 
 class ReformatOnlyWorkspacer(LogicWorkspacer):
-    """Keep the upstream pass's input reformats without inserting workspaces."""
+    """LogicWorkspacer.lower with only add_cost_effective_workspaces skipped: the
+    same input reformats and, where the workspacer adds them, the same
+    accumulators, so the two modes differ only in workspace insertion."""
 
     def lower(self, program, bindings, stats, stats_factory):
         program = add_cost_effective_reformats(
@@ -92,26 +99,27 @@ class ReformatOnlyWorkspacer(LogicWorkspacer):
             self.options,
             self.format_cost,
         )
+        if add_accumulators is not None and getattr(self, "accumulators", False):
+            program, formats = add_accumulators(program, bindings)
+            bindings = {**bindings, **formats}
         return self.ctx(program, bindings, stats, stats_factory)
 
 
 def configured_scheduler(preset, *, workspaces=None):
     """Clone a preset with fresh kernel caches and no trace instrumentation.
 
-    None retains the preset. False replaces only workspace insertion with a
-    reformat-only pass. Loop search, fusion, statistics, cost models, and the
-    input/output format planners keep the preset's configuration.
+    None retains the preset. False skips only the workspacer's workspace
+    insertion, keeping its reformats and accumulators. Loop search, fusion,
+    statistics, cost models, and the input/output format planners keep the
+    preset's configuration.
     """
 
     def clone(stage):
         copied = copy(stage)
         if isinstance(stage, LogicWorkspacer) and workspaces is not None and not workspaces:
-            copied = ReformatOnlyWorkspacer(
-                stage.ctx,
-                cost_model=stage.cost_model,
-                options=stage.options,
-                format_cost=stage.format_cost,
-            )
+            # The same workspacer, with every attribute it was configured with,
+            # whose lower skips only workspace insertion.
+            copied.__class__ = ReformatOnlyWorkspacer
         if isinstance(copied, LogicExecutor):
             copied.cached_kernels = {}
         for attr in ("ctx", "ctx_lower", "ctx_load"):

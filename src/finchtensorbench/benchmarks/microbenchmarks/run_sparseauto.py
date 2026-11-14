@@ -18,7 +18,7 @@ from src.file_storing import read_baskets_from_json
 from src.generate_taco_schedule import UnfusedConfigToTacoVisitor
 from src.main_run_test_modified import ALLOWED_ELEMENT_SIZE
 
-from finchtensorbench.benchmarks.scripts.util import paper_spgemm
+from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, paper_spgemm
 
 ROOT = Path(os.environ["PIXI_PROJECT_ROOT"])
 SCHEDULER = ROOT / "external/tensor-schedules"
@@ -28,6 +28,11 @@ TEST_FILE = TACO / "test/tests-finchbench.cpp"
 
 ROWS = 5000
 COLS = 5000
+SDDMM_ROWS = 20000  # SDDMM uses larger matrices than chain matmul
+SDDMM_COLS = 20000
+SDDMM_DENSITIES = (0.001, 0.003, 0.01, 0.03, 0.1)  # >= 400K mask nonzeros, well above call overhead
+CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
+CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
 THREADS = int(os.environ.get("THREADS", "1"))  # >1 also makes SparseAuto emit parallel schedules
 TRIALS = 5
@@ -92,6 +97,15 @@ Tensor<double> read_csr(const std::string& path, const std::string& name) {
   return t;
 }
 
+// SDDMM and the chain compute in float32, the precision Scorch runs in.
+Tensor<float> read_csr32(const std::string& path, const std::string& name) {
+  Tensor<double> t = read(path, Format({Dense, Sparse}), true);
+  Tensor<float> f(name, t.getDimensions(), Format({Dense, Sparse}));
+  for (const auto& v : t) f.insert(v.first.toVector(), (float)v.second);
+  f.pack();
+  return f;
+}
+
 void setup_threads() {
   int nthreads = std::stoi(util::getFromEnv("OMP_NUM_THREADS", "1"));
   taco_set_num_threads(nthreads);
@@ -114,6 +128,13 @@ void report_sum(std::vector<Tensor<double>> outputs) {
 
 void report_sum(Tensor<double>& out) { report_sum(std::vector<Tensor<double>>{out}); }
 
+void report_sum(Tensor<float>& out) {
+  double sum = 0;
+  for (const auto& val : out) sum += val.second;
+  std::cout.precision(17);
+  std::cout << "FINCHBENCH_SUM " << sum << endl;
+}
+
 // Compile each kernel, then time computing all of them in order.
 void time_kernels(std::vector<std::pair<Tensor<double>, IndexStmt>> kernels,
                   std::vector<Tensor<double>> outputs) {
@@ -129,13 +150,6 @@ void time_kernels(std::vector<std::pair<Tensor<double>, IndexStmt>> kernels,
   report_sum(outputs);
 }
 
-struct MaxReduce {
-  ir::Expr operator()(const std::vector<ir::Expr>& v) { return ir::Max::make(v[0], v[1]); }
-};
-
-struct MinReduce {
-  ir::Expr operator()(const std::vector<ir::Expr>& v) { return ir::Min::make(v[0], v[1]); }
-};
 }  // namespace
 """
 
@@ -145,16 +159,16 @@ SDDMM_TEST = r"""
 // A(i,j) = B(i,j) * C(i,k) * D(k,j): B is the CSR mask, C and D are dense.
 TEST(finchbench, sddmm) {
   setup_threads();
-  Tensor<double> B = read_csr(util::getFromEnv("TENSOR_FILE", ""), "B");
+  Tensor<float> B = read_csr32(util::getFromEnv("TENSOR_FILE", ""), "B");
   int I = B.getDimension(0), J = B.getDimension(1);
   int K = std::stoi(util::getFromEnv("FINCHBENCH_K", "128"));
-  Tensor<double> C("C", {I, K}, Format{Dense, Dense});
-  for (int i = 0; i < I; i++) for (int k = 0; k < K; k++) C.insert({i, k}, fill(i, k));
+  Tensor<float> C("C", {I, K}, Format{Dense, Dense});
+  for (int i = 0; i < I; i++) for (int k = 0; k < K; k++) C.insert({i, k}, (float)fill(i, k));
   C.pack();
-  Tensor<double> D("D", {K, J}, Format{Dense, Dense});
-  for (int k = 0; k < K; k++) for (int j = 0; j < J; j++) D.insert({k, j}, fill(k, j));
+  Tensor<float> D("D", {K, J}, Format{Dense, Dense});
+  for (int k = 0; k < K; k++) for (int j = 0; j < J; j++) D.insert({k, j}, (float)fill(k, j));
   D.pack();
-  Tensor<double> A("A", {I, J}, Format{Dense, Dense});
+  Tensor<float> A("A", {I, J}, Format{Dense, Dense});
   IndexVar i("i"), j("j"), k("k");
 
   /* BEGIN finchbench_sddmm TEST */
@@ -163,9 +177,9 @@ TEST(finchbench, sddmm) {
   stmt = stmt.concretize();
   std::cout << "final stmt: " << stmt << endl;
   A.compile(stmt);
-  A.assemble();
   for (int it = 0; it < iterations(); it++) {
     auto begin = std::chrono::steady_clock::now();
+    A.assemble();  // allocate the output in the timed region, like the other backends
     /* BEGIN finchbench_sddmm_execute TEST */
     /* END finchbench_sddmm_execute TEST */
     report_ms(begin);
@@ -177,21 +191,22 @@ TEST(finchbench, sddmm) {
 
 def sddmm_benchmark(directory):
     k = 128
-    c, d = dense_fill(ROWS, k), dense_fill(k, COLS)
+    rows, cols = SDDMM_ROWS, SDDMM_COLS
+    c, d = dense_fill(rows, k), dense_fill(k, cols)
     cases = []
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0):
-        mask = random_csr((ROWS, COLS), density, SEED + 2)
+    for density in SDDMM_DENSITIES:
+        mask = random_csr((rows, cols), density, SEED + 2)
         cases.append({
-            "density": mask.nnz / (ROWS * COLS),
+            "density": mask.nnz / (rows * cols),
             "env": {"TENSOR_FILE": write_mtx(directory, f"sddmm_{density:g}", mask),
                     "FINCHBENCH_K": str(k)},
-            "actual": {"i": ROWS, "j": COLS, "k": k, "jpos": pos(mask)},
-            "expected": float((mask.toarray() * (c @ d)).sum()),
+            "actual": {"i": rows, "j": cols, "k": k, "jpos": pos(mask)},
+            "expected": float(mask.multiply(c @ d).sum()),
         })
     config = {
         "accesses": {"A": ["i", "j"], "B": ["i", "j"], "C": ["i", "k"], "D": ["k", "j"]},
         "tensor_idx_order_constraints": {"B": [["j", "i"]]},
-        "z3_constraints": exact({"i": ROWS, "j": COLS, "k": k}) + ["jpos >= 1", "jpos <= j"],
+        "z3_constraints": exact({"i": rows, "j": cols, "k": k}) + ["jpos >= 1", "jpos <= j"],
     }
     return config, cases
 
@@ -202,12 +217,12 @@ CHAIN_TEST = r"""
 // A(i,l) = B(i,j) * C(j,k) * D(k,l): all CSR; D (TENSOR_FILE) varies.
 TEST(finchbench, chain) {
   setup_threads();
-  Tensor<double> B = read_csr(util::getFromEnv("FINCHBENCH_B", ""), "B");
-  Tensor<double> C = read_csr(util::getFromEnv("FINCHBENCH_C", ""), "C");
-  Tensor<double> D = read_csr(util::getFromEnv("TENSOR_FILE", ""), "D");
+  Tensor<float> B = read_csr32(util::getFromEnv("FINCHBENCH_B", ""), "B");
+  Tensor<float> C = read_csr32(util::getFromEnv("FINCHBENCH_C", ""), "C");
+  Tensor<float> D = read_csr32(util::getFromEnv("TENSOR_FILE", ""), "D");
   int I = B.getDimension(0), J = B.getDimension(1);
   int K = C.getDimension(1), L = D.getDimension(1);
-  Tensor<double> A("A", {I, L}, Format{Dense, Dense});
+  Tensor<float> A("A", {I, L}, Format{Dense, Dense});
   IndexVar i("i"), j("j"), k("k"), l("l");
 
   /* BEGIN finchbench_chain TEST */
@@ -216,9 +231,9 @@ TEST(finchbench, chain) {
   stmt = stmt.concretize();
   std::cout << "final stmt: " << stmt << endl;
   A.compile(stmt);
-  A.assemble();
   for (int it = 0; it < iterations(); it++) {
     auto begin = std::chrono::steady_clock::now();
+    A.assemble();  // allocate the output in the timed region, like the other backends
     /* BEGIN finchbench_chain_execute TEST */
     /* END finchbench_chain_execute TEST */
     report_ms(begin);
@@ -230,13 +245,13 @@ TEST(finchbench, chain) {
 
 def chain_benchmark(directory):
     n = ROWS
-    b = random_csr((ROWS, COLS), 0.1, SEED)
-    c = random_csr((ROWS, COLS), 0.1, SEED + 1)
+    b = random_csr((ROWS, COLS), CHAIN_AB_DENSITY, SEED)
+    c = random_csr((ROWS, COLS), CHAIN_AB_DENSITY, SEED + 1)
     env = {"FINCHBENCH_B": write_mtx(directory, "chain_B", b),
            "FINCHBENCH_C": write_mtx(directory, "chain_C", c)}
     bc = b @ c
     cases = []
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1):
+    for density in CHAIN_DENSITIES:
         d = random_csr((ROWS, COLS), density, SEED + 2)
         cases.append({
             "density": d.nnz / (ROWS * COLS),
@@ -256,7 +271,7 @@ def chain_benchmark(directory):
 ######################### Gustavson / Outer Product ##########################
 
 SPGEMM_TEST = r"""
-// C(i,j) = A(i,k) * B(k,j) with A the paper's A and B the paper's B transposed, i.e. C = A @ B.T.
+// C(i,j) = A(i,k) * B(k,j), i.e. C = A @ B, with A and B from paper_spgemm.make_problem.
 // No hand schedule: TACO's default compile() picks the loop order and inserts any workspace.
 TEST(finchbench, spgemm) {
   setup_threads();
@@ -280,10 +295,10 @@ TEST(finchbench, spgemm) {
 def spgemm_benchmark(directory):
     cases = []
     for shared in (1, 4, 16, 64, 256, 1024, 4096, 16384, 65536):
-        a, b = paper_spgemm.make_inputs(shared)
+        a, b = paper_spgemm.benchmark_problem(shared)
         case = {"env": {"FINCHBENCH_A": write_mtx(directory, f"spgemm_A_{shared}", a),
-                        "FINCHBENCH_B": write_mtx(directory, f"spgemm_Bt_{shared}", b.T)},
-                "expected": float((a @ b.T).sum())}
+                        "FINCHBENCH_B": write_mtx(directory, f"spgemm_B_{shared}", b)},
+                "expected": float((a @ b).sum())}
         cases.append(("spgemm", shared, case))
     return cases
 
@@ -291,19 +306,14 @@ def spgemm_benchmark(directory):
 ######################### Matrix Features ##########################
 
 FEATURES_TEST = r"""
-// Per-row mean, (centered) std dev, max, min of a dense matrix; FINCHBENCH_COUNT of them.
+// Row Lp norms of a CSR matrix (TENSOR_FILE), p = 1..FINCHBENCH_COUNT. The values are
+// nonnegative, so sum_j x^p is a p-way product of X with itself, then a root per row.
 TEST(finchbench, features) {
   setup_threads();
-  int R = std::stoi(util::getFromEnv("FINCHBENCH_ROWS", "1000"));
-  int N = std::stoi(util::getFromEnv("FINCHBENCH_COLS", "1000"));
   int count = std::stoi(util::getFromEnv("FINCHBENCH_COUNT", "1"));
-  Tensor<double> X("X", {R, N}, Format{Dense, Dense});
-  for (int r = 0; r < R; r++) for (int c = 0; c < N; c++) X.insert({r, c}, fill(r, c));
-  X.pack();
+  Tensor<double> X = read_csr(util::getFromEnv("TENSOR_FILE", ""), "X");
+  int R = X.getDimension(0);
   IndexVar i("i"), j("j");
-  IndexExpr inv_n = 1.0 / N;
-  Func row_max("max", MaxReduce(), {Identity(Literal(-INFINITY))});
-  Func row_min("min", MinReduce(), {Identity(Literal(INFINITY))});
 
   std::vector<std::pair<Tensor<double>, IndexStmt>> kernels;
   std::vector<Tensor<double>> outputs;
@@ -311,24 +321,17 @@ TEST(finchbench, features) {
     kernels.push_back({t, t.getAssignment().concretize()});
     if (output) outputs.push_back(t);
   };
-  Tensor<double> mean("mean", {R}, Format{Dense});
-  mean(i) = X(i, j) * inv_n;
-  add(mean, true);
-  Tensor<double> var("var", {R}, Format{Dense}), sd("sd", {R}, Format{Dense});
-  Tensor<double> mx("mx", {R}, Format{Dense}), mn("mn", {R}, Format{Dense});
-  if (count >= 2) {
-    var(i) = sum(j, (X(i, j) - mean(i)) * (X(i, j) - mean(i)) * inv_n);
-    sd(i) = sqrt(var(i));
-    add(var, false);
-    add(sd, true);
-  }
-  if (count >= 3) {
-    mx(i) = Reduction(row_max(), j, X(i, j));
-    add(mx, true);
-  }
-  if (count >= 4) {
-    mn(i) = Reduction(row_min(), j, X(i, j));
-    add(mn, true);
+  for (int p = 1; p <= count; p++) {
+    Tensor<double> total("total" + std::to_string(p), {R}, Format{Dense});
+    IndexExpr power = X(i, j);
+    for (int q = 1; q < p; q++) power = power * X(i, j);
+    total(i) = power;
+    add(total, p == 1);
+    if (p > 1) {
+      Tensor<double> norm("norm" + std::to_string(p), {R}, Format{Dense});
+      norm(i) = pow(total(i), Literal(1.0 / p));
+      add(norm, true);
+    }
   }
   time_kernels(kernels, outputs);
 }
@@ -336,12 +339,13 @@ TEST(finchbench, features) {
 
 
 def matrix_feature_benchmark(directory):
-    x = dense_fill(ROWS, COLS)
-    features = (x.mean(axis=1), x.std(axis=1), x.max(axis=1), x.min(axis=1))
+    x = feature_matrix.make_matrix()
+    features = feature_matrix.reference_norms(x)
+    path = write_mtx(directory, "features", x)
     return [("features", count, {
-        "env": {"FINCHBENCH_ROWS": str(ROWS), "FINCHBENCH_COLS": str(COLS), "FINCHBENCH_COUNT": str(count)},
+        "env": {"TENSOR_FILE": path, "FINCHBENCH_COUNT": str(count)},
         "expected": float(sum(f.sum() for f in features[:count])),
-    }) for count in (1, 2, 3, 4)]
+    }) for count in range(1, len(feature_matrix.POWERS) + 1)]
 
 
 ######################### SparseAuto pipeline ##########################
@@ -375,6 +379,9 @@ def schedule_code(name, accesses, config):
     visitor = UnfusedConfigToTacoVisitor(f"finchbench_{name}", accesses, config.original_idx_perm,
                                          str(TEST_FILE), THREADS)
     visitor.visit(deepcopy(config))
+    # SparseAuto declares its temporaries as Tensor<double>; match the float32 operands.
+    combined = visitor.get_combined_schedule
+    visitor.get_combined_schedule = lambda: combined().replace("Tensor<double>", "Tensor<float>")
     return visitor
 
 
@@ -394,7 +401,8 @@ def run_case(name, case):
     checksum = [float(line.split()[1]) for line in lines if line.startswith("FINCHBENCH_SUM")]
     if result.returncode or len(times) != TRIALS + 1 or not checksum:
         raise RuntimeError(f"taco-test {name} failed:\n{result.stdout[-3000:]}\n{result.stderr[-3000:]}")
-    if not np.isclose(checksum[0], case["expected"], rtol=1e-7, atol=1e-9):
+    # float32 sums of millions of terms carry ~1e-7 relative error.
+    if not np.isclose(checksum[0], case["expected"], rtol=1e-5, atol=1e-9):
         raise RuntimeError(f"{name}: wrong result (sum {checksum[0]} != {case['expected']})")
     return times[1:]  # drop warmup
 
@@ -463,7 +471,8 @@ def run(argv=None):
                           flush=True)
             for test, parameter, samples in fixed_benchmarks(directory):
                 if test == "features":
-                    name, row, label = f"features_{parameter}", (1.0, ""), "density=1"
+                    name, row = f"features_{parameter}", (feature_matrix.DENSITY, "")
+                    label = f"density={feature_matrix.DENSITY:g}"
                 else:
                     name, row, label = test, ("", parameter), f"active_k={parameter}"
                 for trial, seconds in enumerate(samples):

@@ -10,6 +10,7 @@ dependencies = [
     "scipy",
     "sparse",
     "matplotlib (>=3.10.9,<4.0.0)",
+    "gdown>=5.2",
 ]
 
 [project.optional-dependencies]
@@ -28,7 +29,7 @@ module-root = "src"
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]
-platforms = ["osx-arm64", "linux-64"]
+platforms = ["osx-arm64", "linux-64", "linux-aarch64"]
 requires-pixi = ">=0.71.0"
 
 [tool.pixi.dependencies]
@@ -41,8 +42,9 @@ pyinstrument = ">=5.1.3,<6"
 py-spy = ">=0.4.2,<0.5"
 
 [tool.pixi.pypi-dependencies]
-finch-tensor = { git = "https://github.com/finch-tensor/finch-tensor.git", branch = "main", extras = ["julia"] }
+finch-tensor = { git = "https://github.com/finch-tensor/finch-tensor.git", branch = "kbd/workspacer-accumulators", extras = ["julia"] }
 ssgetpy = ">=1.0rc2"
+gdown = ">=5.2"
 
 [tool.pixi.feature.test.dependencies]
 pytest = ">=7.4.4"
@@ -63,7 +65,7 @@ JULIA_DEPOT_PATH = "$PIXI_PROJECT_ROOT/.pixi/galley-julia-depot:"
 GALLEY_JL_PYTHON_CACHE = "$PIXI_PROJECT_ROOT/.pixi/galley-cache"
 
 [tool.pixi.feature.galley.tasks]
-run-galley = "python src/finchtensorbench/benchmarks/scripts/run_galley.py"
+run-galley = "python src/finchtensorbench/benchmarks/microbenchmarks/run_galley.py"
 
 [tool.pixi.feature.scorch.dependencies]
 python = ">=3.11,<3.14"
@@ -84,17 +86,27 @@ no-build-isolation = ["scorch"]
 
 [tool.pixi.feature.scorch.activation.env]
 PYTHONPATH = "src"
+# omp.h / libomp from conda-forge llvm-openmp.
+CPATH = "$CONDA_PREFIX/include"
+LIBRARY_PATH = "$CONDA_PREFIX/lib"
+
+[tool.pixi.feature.scorch.target.osx-arm64.activation.env]
 CC = "/usr/bin/clang"
 CXX = "/usr/bin/clang++"
 # Scorch JIT-compiles kernels with a hardcoded -isystem to the Command Line
 # Tools SDK's libc++; the C headers must come from that same SDK.
 SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
-# omp.h / libomp from conda-forge llvm-openmp.
-CPATH = "$CONDA_PREFIX/include"
-LIBRARY_PATH = "$CONDA_PREFIX/lib"
+
+# On Linux, Scorch builds with conda-forge's GCC, as PyTorch was built: its c++
+# comes first on the PATH, which torch's extension builder uses.
+[tool.pixi.feature.scorch.target.linux-64.dependencies]
+cxx-compiler = "*"
+
+[tool.pixi.feature.scorch.target.linux-aarch64.dependencies]
+cxx-compiler = "*"
 
 [tool.pixi.feature.scorch.tasks]
-run-scorch = "python src/finchtensorbench/benchmarks/scripts/run_scorch.py"
+run-scorch = "python src/finchtensorbench/benchmarks/microbenchmarks/run_scorch.py"
 
 # SparseAuto (OOPSLA'24 artifact, doi:10.5281/zenodo.12764370). Git submodules
 # pinned to the artifact commits:
@@ -140,11 +152,11 @@ PYTHONPATH = "$PIXI_PROJECT_ROOT/src:$PIXI_PROJECT_ROOT/external/tensor-schedule
 build-sparseauto = """
 perl -pi -e 's|#include <bits/types/clock_t.h>|#include <ctime>|' external/sparseLNR/test/tests-workspaces.cpp \
   && cmake -S external/sparseLNR -B external/sparseLNR/build -DCMAKE_BUILD_TYPE=Release \
-       "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -Wno-c++11-narrowing-const-reference" \
+       "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -Wno-c++11-narrowing-const-reference -Wno-narrowing" \
   && cmake --build external/sparseLNR/build -j8 \
   && sh external/tensor-schedules/create_folders.sh
 """
-run-sparseauto = "python src/finchtensorbench/benchmarks/scripts/run_sparseauto.py"
+run-sparseauto = "python src/finchtensorbench/benchmarks/microbenchmarks/run_sparseauto.py"
 
 [tool.pixi.environments]
 test = { features = ["test"] }
@@ -164,23 +176,26 @@ numba = ">=0.61,<0.63.1"  # galley-jl-python's range; conda would pick newer
 PYTHONPATH = "$PIXI_PROJECT_ROOT/src:$PIXI_PROJECT_ROOT/external/tensor-schedules"
 JULIA_DEPOT_PATH = "$PIXI_PROJECT_ROOT/.pixi/global-julia-depot:"
 GALLEY_JL_PYTHON_CACHE = "$PIXI_PROJECT_ROOT/.pixi/global-galley-cache"
+CPATH = "$CONDA_PREFIX/include"
+LIBRARY_PATH = "$CONDA_PREFIX/lib"
+
+[tool.pixi.feature.global.target.osx-arm64.activation.env]
 CC = "/usr/bin/clang"
 CXX = "/usr/bin/clang++"
 SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
-CPATH = "$CONDA_PREFIX/include"
-LIBRARY_PATH = "$CONDA_PREFIX/lib"
 
 [tool.pixi.activation.env]
 PYTHONPATH = "src"
 JULIA_DEPOT_PATH = "$PIXI_PROJECT_ROOT/.pixi/julia-depot:"
 
 [tool.pixi.tasks]
-run-finch = "python src/finchtensorbench/benchmarks/scripts/run_finch.py"
-run-finch-scheduler = "python src/finchtensorbench/benchmarks/scripts/util/run_finch_scheduler.py"
-run-all = "bash src/finchtensorbench/benchmarks/scripts/run_all.sh"
+run-finch = "python src/finchtensorbench/benchmarks/microbenchmarks/run_finch.py"
+run-finch-scheduler = "python src/finchtensorbench/benchmarks/microbenchmarks/util/run_finch_scheduler.py"
+run-all = "bash src/finchtensorbench/benchmarks/microbenchmarks/run_all.sh"
 
 [tool.pixi.feature.test.tasks]
 test = "pytest"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = ["slow: runs Finch (starts Julia)"]

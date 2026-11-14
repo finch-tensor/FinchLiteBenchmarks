@@ -10,18 +10,26 @@ import scipy.sparse as sps
 import galley_jl_python as gl
 from galley_jl_python.julia import jl
 
-from finchtensorbench.benchmarks.scripts.util import paper_spgemm
+from finchtensorbench.benchmarks.microbenchmarks.util import feature_matrix, paper_spgemm
 
 ROWS = 5000
 COLS = 5000
+SDDMM_ROWS = 20000  # SDDMM uses larger matrices than chain matmul
+SDDMM_COLS = 20000
+SDDMM_DENSITIES = (0.001, 0.003, 0.01, 0.03, 0.1)  # >= 400K mask nonzeros, well above call overhead
+CHAIN_AB_DENSITY = 0.01  # A and B in A @ B @ C
+CHAIN_DENSITIES = (0.000001, 0.00001, 0.0001, 0.001, 0.01)  # C
 SEED = 42
+# Every input is float32, the precision Scorch runs in (its code generator has no
+# float64 sparse outputs), so all four systems compute at the same precision.
+DTYPE = np.float32
 
 
 def random_csr(shape, density, seed):
     matrix = sps.csr_array(sps.random(
         *shape, density=density, format="csr",
         random_state=np.random.default_rng(seed), data_rvs=np.ones,
-    ))
+    )).astype(DTYPE)
     matrix.indices = matrix.indices.astype(np.intp)
     matrix.indptr = matrix.indptr.astype(np.intp)
     return matrix
@@ -36,17 +44,17 @@ def sddmm(a, b, c):
 def sddmm_inputs(k, mask, seed):
     rng = np.random.default_rng(seed + k)
     rows, cols = mask.shape
-    a = rng.random((rows, k))
-    b = rng.random((k, cols))
+    a = rng.random((rows, k)).astype(DTYPE)
+    b = rng.random((k, cols)).astype(DTYPE)
     return gl.asarray(a), gl.asarray(b), gl.asarray(mask)
 
 
 def sddmm_cases():
     results = []
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0):
-        mask = random_csr((ROWS, COLS), density, SEED + 2)
+    for density in SDDMM_DENSITIES:
+        mask = random_csr((SDDMM_ROWS, SDDMM_COLS), density, SEED + 2)
         b, c, mask_galley = sddmm_inputs(128, mask, SEED)
-        results.append(((mask_galley, b, c), mask.nnz / (ROWS * COLS)))
+        results.append(((mask_galley, b, c), mask.nnz / (SDDMM_ROWS * SDDMM_COLS)))
     return results
 
 
@@ -59,9 +67,9 @@ def matmul(a, b, c):
 def chain_cases():
     results = []
     shape = (ROWS, COLS)
-    a = gl.asarray(random_csr(shape, 0.1, SEED))
-    b = gl.asarray(random_csr(shape, 0.1, SEED + 1))
-    for density in (0.00001, 0.0001, 0.001, 0.01, 0.1):
+    a = gl.asarray(random_csr(shape, CHAIN_AB_DENSITY, SEED))
+    b = gl.asarray(random_csr(shape, CHAIN_AB_DENSITY, SEED + 1))
+    for density in CHAIN_DENSITIES:
         c = random_csr(shape, density, SEED + 2)
         results.append(((a, b, gl.asarray(c)), c.nnz / (ROWS * COLS)))
     return results
@@ -70,16 +78,14 @@ def chain_cases():
 ######################### Gustavson / Outer Product ##########################
 
 def spgemm(a, b):
-    return gl.compute(gl.lazy(a) @ gl.lazy(b).T)
+    return gl.compute(gl.lazy(a) @ gl.lazy(b))
 
 
 def spgemm_cases():
     results = []
     for shared in (1, 4, 16, 64, 256, 1024, 4096, 16384, 65536):
-        a, b = paper_spgemm.make_inputs(shared)
-        a = gl.lazy(gl.asarray(a.T)).T
-        b = gl.lazy(gl.asarray(b.T)).T
-        results.append(((a, b), shared))
+        a, b = paper_spgemm.benchmark_problem(shared)
+        results.append(((gl.asarray(a.astype(DTYPE)), gl.asarray(b.astype(DTYPE))), shared))
     return results
 
 
@@ -87,23 +93,21 @@ def spgemm_cases():
 
 @gl.compiled()
 def matrix_features(a, count):
-    denominator = float(a.shape[1])
-    mean = gl.sum(a, axis=1) / denominator
-    outputs = [mean]
-    if count >= 2:
-        centered = a - gl.expand_dims(mean, axis=1)
-        variance = gl.sum(centered * centered, axis=1) / denominator
-        outputs.append(gl.sqrt(variance))
-    if count >= 3:
-        outputs.append(gl.max(a, axis=1))
-    if count >= 4:
-        outputs.append(gl.min(a, axis=1))
+    # Row Lp norms, p = 1..count. The values are nonnegative, so no abs is needed.
+    outputs = []
+    for p in feature_matrix.POWERS[:count]:
+        total = gl.sum(a if p == 1 else a ** p, axis=1)
+        outputs.append(total if p == 1 else total ** DTYPE(1.0 / p))
     return tuple(outputs)
 
 
 def matrix_feature_cases():
-    a = gl.asarray(np.random.default_rng(SEED).random((ROWS, COLS)))
-    return [(f"features_{count}", (a, count)) for count in (1, 2, 3, 4)]
+    matrix = feature_matrix.make_matrix().astype(DTYPE)
+    matrix.indices = matrix.indices.astype(np.intp)
+    matrix.indptr = matrix.indptr.astype(np.intp)
+    a = gl.asarray(matrix)
+    return [(f"features_{count}", (a, count))
+            for count in range(1, len(feature_matrix.POWERS) + 1)]
 
 
 ######################### Main ##########################
@@ -120,7 +124,7 @@ def cases():
     for inputs, shared_k in spgemm_cases():
         results.append(("spgemm", spgemm, inputs, shared_k))
     for name, inputs in matrix_feature_cases():
-        results.append((name, matrix_features, inputs, 1.0))
+        results.append((name, matrix_features, inputs, feature_matrix.DENSITY))
     return results
 
 

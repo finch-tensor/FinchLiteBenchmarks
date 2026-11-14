@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import scipy.sparse as sps
 
-from matplotlib import colormaps
+from matplotlib import colormaps, rc_context
 from matplotlib.figure import Figure
 
 import finch as ft
@@ -51,6 +51,15 @@ from finch.tests.stats_cases import (
 )
 
 GEOMEAN_DATASETS = ("ct20stif", "roadNet-PA", "soc-sign-epinions")
+# The kernels the plots show (all of KERNELS are computed and saved).
+PLOT_KERNELS = ("SpGEMM2", "Triangle Counting")
+# The look of the microbenchmark and subgraph plots, at a larger size.
+STYLE = {"font.size": 16, "axes.titlesize": 19, "axes.labelsize": 17,
+         "legend.fontsize": 14, "pdf.fonttype": 42,
+         "figure.facecolor": "white", "savefig.facecolor": "white"}
+LABELS = {"Sampling_sh3": "Sampling (sh3)", "Sampling_schlosser": "Sampling (Schlosser)"}
+# How the plots name the kernels (accuracy.json keeps finch's names).
+KERNEL_TITLES = {"SpGEMM2": "A$^3$"}
 SAMPLING = ("sh3", "schlosser")
 DATASETS = [
     ("Banded", partial(make_banded, SPARSE_MATRIX_SIZE)),
@@ -169,14 +178,14 @@ def accuracy_results():
     }
 
 
-def plot_accuracy(results):
-    fig = Figure(figsize=(18, 16), layout="constrained")
-    axes = fig.subplots(len(KERNELS), 1)
+def plot_accuracy(results, kernels=PLOT_KERNELS):
+    fig = Figure(figsize=(18, 1.5 + 3.8 * len(kernels)), layout="constrained")
+    axes = fig.subplots(len(kernels), 1, squeeze=False)[:, 0]
     models = list(make_models())
     datasets = [name for name, _ in DATASETS]
     x = np.arange(len(datasets))
     width = 0.8 / len(models)
-    for ax, kernel in zip(axes, KERNELS, strict=True):
+    for ax, kernel in zip(axes, kernels, strict=True):
         for index, model in enumerate(models):
             values = np.log2(
                 [results[kernel][dataset][model]["ratio"] for dataset in datasets]
@@ -188,31 +197,54 @@ def plot_accuracy(results):
                 np.clip(values, -10, 10),
                 width=width,
                 color=color,
-                label=model,
+                label=LABELS.get(model, model),
                 zorder=3,
             )
             for position, value in zip(positions, values, strict=True):
                 if abs(value) < 0.1:
                     ax.plot(position, 0, marker="x", color=color, markersize=5)
                 elif abs(value) > 10:
+                    # The clipped bar's true value, written up its length from the
+                    # clipped end, in a color that reads on the bar.
+                    r, g, b = color[:3]
+                    dark = 0.299 * r + 0.587 * g + 0.114 * b < 0.6
                     ax.text(
                         position,
-                        np.sign(value) * 9.5,
+                        np.sign(value) * 9.6,
                         f"{value:+.1f}",
                         ha="center",
-                        va="center",
-                        fontsize=6,
+                        va="top" if value > 0 else "bottom",
+                        rotation=90,
+                        fontsize=12,
+                        fontweight="bold",
+                        color="white" if dark else "black",
+                        zorder=4,
                     )
         ax.axhline(0, color="black", linestyle="--", linewidth=1)
-        ax.set(title=kernel, ylabel="log2(estimated / actual nnz)", ylim=(-10, 10))
+        ax.set(ylabel="log$_2$(estimated / actual nnz)", ylim=(-10, 10))
+        # Room between the title and bars clipped at the top of the axis.
+        ax.set_title(KERNEL_TITLES.get(kernel, kernel), pad=14)
         ax.set_xticks(x, datasets, rotation=20, ha="right")
-        ax.grid(axis="y", linestyle=":", alpha=0.5)
-    axes[0].legend(loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=8)
-    fig.suptitle(f"Sparsity estimator accuracy — sampling budget {SAMPLE_NNZ:,} nnz")
+        ax.grid(axis="y", alpha=0.2)
+        ax.set_axisbelow(True)
+        ax.spines[["top", "right"]].set_visible(False)
+    # Inside the first panel's lower left, which its bars leave empty.
+    axes[0].legend(loc="lower left", ncol=4, frameon=False)
     return fig
 
 
-def plot_geomean(geomeans):
+def geomean_q_errors(results, kernels=PLOT_KERNELS):
+    """Each model's geometric-mean q-error over GEOMEAN_DATASETS and *kernels*."""
+    return {
+        model: float(np.exp(np.mean([
+            np.log(results[kernel][dataset][model]["q_error"])
+            for kernel in kernels for dataset in GEOMEAN_DATASETS
+        ])))
+        for model in make_models()
+    }
+
+
+def plot_geomean(geomeans, kernels=PLOT_KERNELS):
     fig = Figure(figsize=(14, 6), layout="constrained")
     ax = fig.subplots()
     models = list(make_models())
@@ -221,17 +253,21 @@ def plot_geomean(geomeans):
         x,
         [geomeans[model] for model in models],
         color=[colormaps["tab20"](i / 19) for i in x],
+        zorder=3,
     )
     ax.axhline(1, color="black", linestyle="--", label="Perfect estimate")
     ax.set_yscale("log", base=2)
-    ax.set_xticks(x, models, rotation=35, ha="right", fontsize=9)
+    ax.set_xticks(x, [LABELS.get(m, m) for m in models], rotation=35, ha="right")
+    ax.grid(axis="y", alpha=0.2)
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right"]].set_visible(False)
     ax.set(
         ylabel="Geometric mean q-error",
         title="Estimator accuracy — real matrices only\n"
         + ", ".join(GEOMEAN_DATASETS)
-        + f" ({len(KERNELS)} kernels each)",
+        + f" ({', '.join(KERNEL_TITLES.get(k, k) for k in kernels)})",
     )
-    ax.legend()
+    ax.legend(frameon=False)
     return fig
 
 
@@ -243,23 +279,34 @@ def main():
         default=Path(__file__).resolve().parents[3] / "graph" / "stats_comparison",
         help="Directory for JSON results and PNG plots (default: graph/stats_comparison)",
     )
+    parser.add_argument(
+        "--results",
+        type=Path,
+        help="Plot an existing accuracy.json instead of recomputing the estimates",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    results = accuracy_results()
-    output = args.output_dir / "accuracy.json"
-    output.write_text(
-        json.dumps(results, indent=2, sort_keys=True, allow_nan=False) + "\n"
-    )
-    logging.getLogger(__name__).info("Saved %s", output)
-    for view, fig in (
-        ("accuracy", plot_accuracy(results["results"])),
-        ("geomean", plot_geomean(results["geomean_q_error"])),
-    ):
-        output = args.output_dir / f"{view}.png"
-        fig.savefig(output, format="png", dpi=100)
+    if args.results:
+        results = json.loads(args.results.read_text())
+    else:
+        results = accuracy_results()
+        output = args.output_dir / "accuracy.json"
+        output.write_text(
+            json.dumps(results, indent=2, sort_keys=True, allow_nan=False) + "\n"
+        )
         logging.getLogger(__name__).info("Saved %s", output)
+    with rc_context(STYLE):
+        figures = (
+            ("accuracy", plot_accuracy(results["results"])),
+            ("geomean", plot_geomean(geomean_q_errors(results["results"]))),
+        )
+        for view, fig in figures:
+            for fmt in ("pdf", "png"):
+                output = args.output_dir / f"{view}.{fmt}"
+                fig.savefig(output, format=fmt, dpi=200)
+                logging.getLogger(__name__).info("Saved %s", output)
 
 
 if __name__ == "__main__":

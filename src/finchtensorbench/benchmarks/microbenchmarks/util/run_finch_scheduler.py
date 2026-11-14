@@ -4,7 +4,7 @@ import argparse
 import csv
 from pathlib import Path
 
-from finchtensorbench.benchmarks.scripts.run_finch import cases, warm_case
+from finchtensorbench.benchmarks.microbenchmarks.run_finch import cases, warm_case
 
 
 FIELDS = (
